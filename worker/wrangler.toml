@@ -8,8 +8,8 @@ compatibility_date = "2024-09-23"
 # the endpoint is creating CRM records.
 # PUBLIC_BASE_URL is this Worker's own origin, used to build /download links.
 [vars]
-# ALLOWED_ORIGINS = "https://vaishnavi-supy-io.github.io,https://app.supy.io"
-# PUBLIC_BASE_URL = "https://supy-expansion.vaishnavi-5d1.workers.dev"
+ALLOWED_ORIGINS = "https://vaishnavi-supy-io.github.io"
+PUBLIC_BASE_URL = "https://supy-expansion.vaishnavi-5d1.workers.dev"
 
 # ── KV: recent submission log (optional) ──────────────────────
 #   npx wrangler kv namespace create LOGS

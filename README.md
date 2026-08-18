@@ -8,6 +8,16 @@ to the right CRM record, instead of as an email thread someone has to unpick.
 **Nothing is provisioned automatically.** The Worker records and routes the
 request. Scope and timing are still confirmed by a human.
 
+| | |
+|---|---|
+| Live form | https://vaishnavi-supy-io.github.io/supy-expansion/ |
+| Filled-in sample | https://vaishnavi-supy-io.github.io/supy-expansion/sample.html |
+| Endpoint | `https://supy-expansion.vaishnavi-5d1.workers.dev/webhook` |
+
+The form is live but the Worker is **not deployed yet** — submissions will fail
+until the secrets below are set and `wrangler deploy` has run. The sample page
+never posts anywhere; it renders the payload instead.
+
 ```
 index.html  (client fills it in)
      │
@@ -59,9 +69,10 @@ npx wrangler secret put ADMIN_TOKEN
 npx wrangler deploy
 ```
 
-Then set `CONFIG.webhookUrl` in `index.html` to the deployed URL if it differs
-from `https://supy-expansion.vaishnavi-5d1.workers.dev/webhook`, and uncomment
-`ALLOWED_ORIGINS` and `PUBLIC_BASE_URL` in `wrangler.toml`.
+If the deployed Worker URL differs from the one above, update both
+`CONFIG.webhookUrl` in `index.html` and `PUBLIC_BASE_URL` in `wrangler.toml`.
+`ALLOWED_ORIGINS` is already set to the GitHub Pages origin — add to it if the
+form is ever embedded somewhere else, since a missing origin fails CORS.
 
 Optional KV, for the submission log and the rate limiter. Without them the
 Worker still runs; it just does not log or throttle.
