@@ -204,7 +204,23 @@ async function handleWebhook(request, env, ctx) {
   const slackOk = await sendSlack(env, payload, documents, contactId, submissionId);
   results.push(slackOk ? "slack:ok" : "slack:fail");
 
-  // 8. Log, best-effort and off the response path.
+  // 8. Email. The client receipt is gated on HubSpot having recognised the
+  //    contact, so this endpoint cannot be used to send Supy-branded mail to
+  //    an arbitrary address.
+  const internalOk = await sendInternalEmail(env, payload, documents, receivedAt, submissionId);
+  results.push(internalOk ? "email:ok" : "email:fail");
+  if (contactId) {
+    const receiptOk = await sendClientReceipt(env, payload, documents, receivedAt, submissionId);
+    results.push(receiptOk ? "receipt:ok" : "receipt:fail");
+  } else {
+    results.push("receipt:skipped");
+  }
+
+  // 9. Google Sheets mirror.
+  const sheetsOk = await logToSheets(env, payload, documents, receivedAt, submissionId);
+  results.push(sheetsOk ? "sheets:ok" : "sheets:fail");
+
+  // 10. Log, best-effort and off the response path.
   const logLine = `${receivedAt} | ${submissionId} | ${payload.requester.email} | ${account} | ${results.join(",")}`;
   if (ctx && typeof ctx.waitUntil === "function") {
     ctx.waitUntil(appendLog(env, logLine));
@@ -775,6 +791,130 @@ function buildNote(p, documents, receivedAt, submissionId) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Email (Gmail OAuth refresh-token flow)
+//
+// Two messages: an internal notification to the team, and a receipt to the
+// client showing exactly what they submitted. The receipt only goes out when
+// HubSpot recognised the contact — otherwise anyone could use this endpoint to
+// send Supy-branded mail to an address of their choosing.
+// ─────────────────────────────────────────────────────────────
+const EMAIL_FROM       = "vaishnavi@supy.io";
+const EMAIL_REPLY_TO   = "csms@supy.io";
+const EMAIL_RECIPIENTS = ["vaishnavi@supy.io"];
+
+async function getGmailToken(env) {
+  if (!env.GMAIL_CLIENT_ID || !env.GMAIL_CLIENT_SECRET || !env.GMAIL_REFRESH_TOKEN) return null;
+  try {
+    const r = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type:    "refresh_token",
+        client_id:     env.GMAIL_CLIENT_ID,
+        client_secret: env.GMAIL_CLIENT_SECRET,
+        refresh_token: env.GMAIL_REFRESH_TOKEN,
+      }),
+    });
+    if (!r.ok) {
+      console.error("Gmail token refresh failed", r.status);
+      return null;
+    }
+    return (await r.json()).access_token || null;
+  } catch (err) {
+    console.error("Gmail token refresh threw", String(err));
+    return null;
+  }
+}
+
+// A header value containing CR or LF can inject extra headers, so anything
+// interpolated into the MIME block is stripped first.
+const hdr = s => String(s === null || s === undefined ? "" : s).replace(/[\r\n]+/g, " ").slice(0, 200);
+
+async function sendGmail(token, { to, subject, html, replyTo }) {
+  const mime = [
+    `From: Supy <${EMAIL_FROM}>`,
+    `To: ${hdr(to)}`,
+    replyTo ? `Reply-To: ${hdr(replyTo)}` : null,
+    `Subject: ${hdr(subject)}`,
+    `MIME-Version: 1.0`,
+    `Content-Type: text/html; charset=UTF-8`,
+    ``,
+    html,
+  ].filter(v => v !== null).join("\r\n");
+
+  const raw = btoa(unescape(encodeURIComponent(mime)))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+  const r = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ raw }),
+  });
+  if (!r.ok) console.error("Gmail send failed", r.status, await r.text().catch(() => ""));
+  return r.ok;
+}
+
+function shell(inner) {
+  return `<div style="font-family:Arial,sans-serif;max-width:700px;margin:auto;color:#1a1a2e">
+  <div style="background:#321e57;padding:22px 26px;border-radius:8px 8px 0 0">
+    <span style="color:#fff;font-size:18px;font-weight:700">Supy</span>
+  </div>
+  <div style="background:#fff;padding:26px;border:1px solid #e0d8f0;border-top:none;border-radius:0 0 8px 8px">
+    ${inner}
+  </div>
+</div>`;
+}
+
+async function sendInternalEmail(env, payload, documents, receivedAt, submissionId) {
+  const token = await getGmailToken(env);
+  if (!token) return false;
+  return sendGmail(token, {
+    to:      EMAIL_RECIPIENTS.join(", "),
+    replyTo: str(payload.requester.email) || undefined,
+    subject: buildSubject(payload),
+    html:    shell(buildNote(payload, documents, receivedAt, submissionId)),
+  });
+}
+
+async function sendClientReceipt(env, payload, documents, receivedAt, submissionId) {
+  const token = await getGmailToken(env);
+  if (!token) return false;
+
+  const to = str(payload.requester.email);
+  if (!isEmail(to)) return false;
+
+  const firstName = esc(str(payload.requester.name).split(/\s+/)[0] || "there");
+
+  return sendGmail(token, {
+    to,
+    replyTo: EMAIL_REPLY_TO,
+    subject: `We have your expansion request — ${hdr(str(payload.requester.account))}`,
+    html: shell(`
+      <h2 style="color:#321e57;margin:0 0 8px">Thanks, ${firstName} — we have it.</h2>
+      <p style="color:#555;margin:0 0 18px;font-size:15px">
+        Your expansion request is with your Supy team. They will confirm scope and
+        timing with you, and flag anything else they need, within one business day.
+      </p>
+      <div style="background:#f5f2ff;border-left:4px solid #503390;padding:12px 16px;border-radius:4px;margin-bottom:22px">
+        <p style="margin:0;font-size:14px;color:#321e57">
+          <strong>Nothing has been set up yet.</strong> This is a request, not a change to
+          your account. Nothing will be added until your team confirms it with you.
+          Need to correct something? Just reply to this email.
+        </p>
+      </div>
+      <h3 style="color:#503390;font-size:14px;border-bottom:1px solid #e0d8f0;padding-bottom:6px;margin:0 0 14px">
+        What you sent us
+      </h3>
+      ${buildNote(payload, documents, receivedAt, submissionId)}
+      <hr style="border:none;border-top:1px solid #e0d8f0;margin:22px 0">
+      <p style="color:#aaa;font-size:11px;margin:0">
+        Sent to ${esc(to)} because this request was submitted with that address.
+        Reply any time — it reaches your Customer Success Manager directly.
+      </p>`),
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
 // Slack
 // ─────────────────────────────────────────────────────────────
 const smk = s => String(s === null || s === undefined ? "" : s)
@@ -959,6 +1099,78 @@ function formBaseUrl(env) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Google Sheets mirror
+//
+// Two sheets: one row per request for tracking, and one row per line item for
+// the team working through what actually needs setting up. Both carry the same
+// submission ref so a row can be traced back to the CRM note.
+// ─────────────────────────────────────────────────────────────
+async function logToSheets(env, p, documents, receivedAt, submissionId) {
+  if (!env.GOOGLE_SCRIPT_URL) return false;
+
+  const entityOf = name => (name && name !== DEFAULT_ENTITY ? name : "Existing account entity");
+
+  const rows = [
+    ...p.items.map(i => ({
+      kind:       i.type === "Cost center" ? "Cost center" : "Outlet",
+      name:       i.name,
+      type:       i.type,
+      parent:     i.parentOutlet || "",
+      address:    i.address || "",
+      cloneFrom:  i.cloneFrom || "",
+      quantity:   1,
+      billsUnder: entityOf(i.billsUnder),
+      details:    i.details || "",
+    })),
+    ...p.features.flatMap(f =>
+      (Array.isArray(f.allocations) ? f.allocations : []).map(a => ({
+        kind:       "Feature",
+        name:       f.name,
+        type:       "Feature",
+        parent:     "", address: "", cloneFrom: "",
+        quantity:   Number(a.quantity) || 0,
+        billsUnder: entityOf(a.billsUnder),
+        details:    "",
+      }))),
+  ];
+
+  try {
+    const res = await fetch(env.GOOGLE_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        submissionId,
+        receivedAt,
+        summary:      buildSubject(p),
+        account:      p.requester.account,
+        contactName:  p.requester.name,
+        contactEmail: p.requester.email,
+        contactPhone: p.requester.phone || "",
+        country:      p.requester.country || "",
+        scope:        p.accountScope.target || "",
+        existingAccount: p.accountScope.existingAccountName || "",
+        newAccount:      p.accountScope.newAccountName || "",
+        outletCount:     p.items.filter(i => i.type !== "Cost center").length,
+        costCenterCount: p.items.filter(i => i.type === "Cost center").length,
+        featureCount:    p.features.length,
+        sameLegalEntity: p.billing.sameLegalEntity || "",
+        entities: p.billing.entities.map(e => ({
+          name: e.name, registrationNumber: e.registrationNumber || "", trn: e.trn || "",
+        })),
+        documents: documents.map(d => ({ filename: d.filename, category: d.category, url: d.url || "" })),
+        notes: p.notes || "",
+        rows,
+      }),
+    });
+    if (!res.ok) console.error("Sheets append failed", res.status);
+    return res.ok;
+  } catch (err) {
+    console.error("Sheets append threw", String(err));
+    return false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
 // Download proxy  (GET /download?key=&name=)
 // ─────────────────────────────────────────────────────────────
 function sanitizeFilename(name) {
@@ -1051,6 +1263,10 @@ function handleDebug(request, env) {
     CLIENT_SECRET:         Boolean(env.CLIENT_SECRET),
     REFRESH_TOKEN:         Boolean(env.REFRESH_TOKEN),
     SLACK_WEBHOOK_URL:     Boolean(env.SLACK_WEBHOOK_URL),
+    GMAIL_CLIENT_ID:       Boolean(env.GMAIL_CLIENT_ID),
+    GMAIL_CLIENT_SECRET:   Boolean(env.GMAIL_CLIENT_SECRET),
+    GMAIL_REFRESH_TOKEN:   Boolean(env.GMAIL_REFRESH_TOKEN),
+    GOOGLE_SCRIPT_URL:     Boolean(env.GOOGLE_SCRIPT_URL),
     CLOUDINARY_CLOUD_NAME: Boolean(env.CLOUDINARY_CLOUD_NAME),
     CLOUDINARY_API_KEY:    Boolean(env.CLOUDINARY_API_KEY),
     CLOUDINARY_API_SECRET: Boolean(env.CLOUDINARY_API_SECRET),
