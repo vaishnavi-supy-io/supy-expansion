@@ -1,0 +1,1928 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Expansion Request (sample data) | Supy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy:#321e57;
+  --purple:#503390;
+  --bright:#7b51bf;
+  --action:#6C3FC5;
+  --action-dark:#4A2A8A;
+  --yellow:#fcd34d;
+  --text:#1A1A2E;
+  --gray:#888888;
+  --page:#f6f6f8;
+  --card:#ffffff;
+  --field-border:#e4e4e9;
+  --divider:#efedfa;
+  --table-head:#f5f3fb;
+  --readonly:#d9d9de;
+  --green:#00a06a;
+  --ok-bg:#E8FAF0; --ok-text:#1A8A5C;
+  --warn-bg:#FEF9EC; --warn-text:#B8860B;
+  --err-bg:#FEE2E2; --err-text:#DC2626;
+  --neutral-bg:#EDE9FB; --neutral-text:#6C3FC5;
+  --radius:8px;
+  --shadow:0 1px 3px rgba(0,0,0,.06);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--page);
+  color:var(--text);
+  font-family:'Noto Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  font-size:14px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+button{font-family:inherit}
+
+/* ---------- top bar ---------- */
+.topbar{
+  background:#fff;border-bottom:1px solid var(--divider);
+  padding:10px 24px;display:flex;align-items:center;gap:16px;
+}
+.topbar .logo{height:22px;width:auto;display:block}
+.topbar .spacer{flex:1}
+
+/* ---------- page head ---------- */
+.wrap{max-width:1840px;margin:0 auto;padding:14px 28px 40px}
+.crumbs{
+  display:flex;align-items:center;gap:8px;color:var(--gray);
+  font-size:12px;margin-bottom:10px;
+}
+.crumbs svg{width:14px;height:14px;flex:none}
+.crumbs b{color:var(--text);font-weight:500}
+h1{font-size:20px;font-weight:600;margin:0 0 16px}
+h1 .dyn{color:var(--green)}
+.tabrow{display:flex;gap:4px;border-bottom:1px solid var(--divider);margin-bottom:18px}
+.tab{
+  display:flex;align-items:center;gap:7px;padding:11px 14px;font-size:13px;font-weight:600;
+  color:var(--gray);border-radius:8px 8px 0 0;background:none;border:none;
+}
+.tab.on{background:var(--neutral-bg);color:var(--action)}
+.tab svg{width:15px;height:15px}
+
+/* ---------- layout ---------- */
+.cols{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:22px;align-items:start}
+@media (max-width:1240px){.cols{grid-template-columns:1fr}}
+
+.card{
+  background:var(--card);border:1px solid var(--divider);border-radius:10px;
+  box-shadow:var(--shadow);padding:24px 28px;margin-bottom:20px;
+}
+.card h2{font-size:15px;font-weight:700;margin:0 0 20px;letter-spacing:-.01em}
+.card.side{position:sticky;top:16px;padding:0;overflow:hidden}
+@media (max-width:1240px){.card.side{position:static}}
+.side-head{padding:18px 18px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.side-head h2{margin:0}
+.side-head .count{font-size:13px;color:var(--gray)}
+
+/* ---------- fields ---------- */
+.field{margin-bottom:18px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.row3{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+@media (max-width:900px){.row3{grid-template-columns:1fr 1fr}}
+@media (max-width:640px){.row2,.row3{grid-template-columns:1fr}}
+label.lbl{display:block;font-size:12px;font-weight:500;margin-bottom:7px;line-height:1.35}
+label.lbl .req{color:#e0342b;margin-left:2px}
+.hint{font-size:11px;color:var(--gray);margin-top:7px;line-height:1.5}
+input[type=text],input[type=email],input[type=tel],select,textarea{
+  width:100%;background:#fff;color:var(--text);
+  border:1px solid var(--field-border);border-radius:var(--radius);
+  padding:10px 12px;font-size:14px;font-family:inherit;
+  transition:border-color .2s ease-out,box-shadow .2s ease-out;
+}
+textarea{min-height:82px;resize:vertical;line-height:1.55}
+input::placeholder,textarea::placeholder{color:#a7a7b0}
+input:hover,select:hover,textarea:hover{border-color:#cfcfd8}
+input:focus,select:focus,textarea:focus{
+  outline:none;border-color:var(--action);box-shadow:0 0 0 3px rgba(108,63,197,.14);
+}
+input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible{
+  outline:2px solid var(--action);outline-offset:2px;
+}
+input[readonly],input:disabled,textarea:disabled{background:var(--readonly);border-color:var(--readonly);color:#6a6a75;cursor:not-allowed}
+.selwrap{position:relative}
+.selwrap select{appearance:none;-webkit-appearance:none;padding-right:42px;cursor:pointer}
+.selwrap .chev{
+  position:absolute;right:10px;top:50%;transform:translateY(-50%);
+  width:20px;height:20px;border-radius:50%;background:var(--neutral-bg);
+  display:grid;place-items:center;pointer-events:none;
+}
+.selwrap .chev svg{width:11px;height:11px;stroke:var(--action);fill:none;stroke-width:2.4}
+.err-msg{display:none;font-size:11px;color:var(--err-text);margin-top:6px;font-weight:500}
+.field.bad input,.field.bad select,.field.bad textarea{border-color:var(--err-text)}
+.field.bad .err-msg{display:block}
+
+/* ---------- radios ---------- */
+.radios{display:flex;flex-direction:column;gap:11px}
+.radio{display:flex;align-items:center;gap:10px;font-size:13px;cursor:pointer}
+.radio input{position:absolute;opacity:0;width:0;height:0}
+.dot{width:18px;height:18px;border-radius:50%;border:1.5px solid #c4c4cf;flex:none;display:grid;place-items:center;background:#fff}
+.dot i{width:8px;height:8px;border-radius:50%;background:var(--action);opacity:0;display:block}
+.radio input:checked+.dot{border-color:var(--action)}
+.radio input:checked+.dot i{opacity:1}
+
+/* ---------- banners ---------- */
+.banner{
+  display:flex;gap:10px;align-items:flex-start;font-size:12px;font-weight:500;
+  border-radius:var(--radius);padding:10px 13px;margin-bottom:16px;
+}
+.banner svg{width:15px;height:15px;flex:none;margin-top:1px}
+.banner.info{background:var(--warn-bg);color:var(--warn-text)}
+.banner.err{background:var(--err-bg);color:var(--err-text)}
+.banner.ok{background:var(--ok-bg);color:var(--ok-text)}
+.banner[hidden]{display:none}
+
+/* ---------- tables ---------- */
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{
+  background:var(--table-head);text-align:left;font-size:10px;font-weight:600;
+  letter-spacing:.9px;text-transform:uppercase;color:#6b6b78;
+  padding:9px 18px;border-top:1px solid var(--divider);border-bottom:1px solid var(--divider);
+  white-space:nowrap;
+}
+.tbl td{padding:11px 18px;border-bottom:1px solid var(--divider);font-size:13px;vertical-align:top}
+.tbl tr:last-child td{border-bottom:none}
+.tbl .grp td{background:#fbfbfd;font-weight:600;font-size:12px;color:var(--text)}
+.tbl .nm{font-weight:500}
+.tbl .sub{font-size:11px;color:var(--gray);margin-top:3px;white-space:pre-wrap}
+.tbl .act{text-align:right;width:44px}
+.badge{
+  display:inline-block;font-size:11px;font-weight:600;padding:3px 8px;border-radius:4px;
+  background:var(--neutral-bg);color:var(--neutral-text);white-space:nowrap;
+}
+.empty{padding:34px 22px;text-align:center;color:var(--gray);font-size:12px}
+.rowin{animation:rowin .28s ease-out}
+@keyframes rowin{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+
+/* ---------- type explainer ---------- */
+.disc{border:1px solid var(--divider);border-radius:var(--radius);background:#fbfbfd;margin:0 0 16px}
+.disc summary{
+  list-style:none;cursor:pointer;padding:10px 14px;font-size:12px;font-weight:600;
+  color:var(--action);display:flex;align-items:center;gap:8px;
+}
+.disc summary::-webkit-details-marker{display:none}
+.disc summary svg{width:12px;height:12px;stroke:currentColor;stroke-width:2.4;fill:none;transition:transform .2s ease-out}
+.disc[open] summary svg{transform:rotate(90deg)}
+.disc summary:hover{color:var(--action-dark)}
+.disc .dbody{padding:2px 14px 14px;border-top:1px solid var(--divider);margin-top:2px}
+.tdefs{display:flex;flex-direction:column;gap:11px;padding-top:12px}
+.tdef{display:grid;grid-template-columns:150px 1fr;gap:14px;font-size:12px;line-height:1.6}
+@media (max-width:620px){.tdef{grid-template-columns:1fr;gap:2px}}
+.tdef dt{font-weight:600}
+.tdef dd{margin:0;color:#5b5b68}
+.tkey{
+  font-size:11px;color:var(--gray);line-height:1.6;margin-top:12px;
+  padding-top:11px;border-top:1px solid var(--divider);
+}
+.tkey b{color:var(--text);font-weight:600}
+
+/* ---------- editable table ---------- */
+.etbl-wrap{margin:0 -26px;overflow-x:auto}
+.etbl{width:100%;border-collapse:collapse;min-width:1020px}
+.etbl th{
+  background:var(--table-head);text-align:left;font-size:10px;font-weight:600;
+  letter-spacing:.9px;text-transform:uppercase;color:#6b6b78;padding:9px 10px;
+  border-top:1px solid var(--divider);border-bottom:1px solid var(--divider);white-space:nowrap;
+}
+.etbl th:first-child{padding-left:26px}
+.etbl th .req{color:#e0342b;margin-left:1px}
+.etbl td{padding:8px 10px;border-bottom:1px solid var(--divider);vertical-align:top}
+.etbl td:first-child{padding-left:26px}
+.etbl tr:last-child td{border-bottom:none}
+.etbl input,.etbl textarea,.etbl select{padding:8px 10px;font-size:13px}
+.etbl textarea{min-height:38px;height:38px;line-height:1.4}
+.etbl textarea:focus{height:88px}
+.etbl .selwrap select{padding-right:36px}
+.etbl .selwrap .chev{width:18px;height:18px;right:8px}
+.etbl .rmcell{width:38px;text-align:right;padding-right:18px}
+.combowrap{position:relative}
+.combowrap input{padding-right:34px}
+.combowrap input::-webkit-calendar-picker-indicator{display:none}
+.chevbtn{
+  position:absolute;right:8px;top:50%;transform:translateY(-50%);
+  width:18px;height:18px;border-radius:50%;background:var(--neutral-bg);
+  border:none;padding:0;display:grid;place-items:center;cursor:pointer;
+}
+.chevbtn svg{width:10px;height:10px;stroke:var(--action);stroke-width:2.6;fill:none}
+.combowrap input:disabled ~ .chevbtn{display:none}
+.bad-cell input,.bad-cell select,.bad-cell textarea{border-color:var(--err-text)}
+.etbl-foot{padding:18px 0 0;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.hints{list-style:none;margin:18px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+.hints li{font-size:11px;color:var(--gray);line-height:1.55;padding-left:12px;position:relative}
+.hints li::before{content:'';position:absolute;left:0;top:6px;width:4px;height:4px;border-radius:50%;background:#c9c9d2}
+.hints b{color:var(--text);font-weight:600}
+.hints dl{margin:6px 0 0;padding:0}
+.hints dl div{display:flex;gap:6px;padding:2px 0}
+.hints dt{font-weight:600;color:var(--text);flex:none}
+
+/* toggle */
+.tog{width:36px;height:20px;border-radius:11px;background:#c9c9d2;border:none;position:relative;cursor:pointer;padding:0;transition:background .2s ease-out}
+.tog i{position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#8b8b96;transition:left .2s ease-out,background .2s ease-out;display:block}
+.tog[aria-checked=true]{background:var(--action)}
+.tog[aria-checked=true] i{left:19px;background:#fff}
+
+/* ---------- dropzone ---------- */
+.drop{
+  border:1.5px dashed #cfcfd8;border-radius:var(--radius);background:#fbfbfd;
+  padding:22px 18px;text-align:center;cursor:pointer;display:block;
+  transition:background .2s ease-out,border-color .2s ease-out;
+}
+.drop:hover,.drop.over{background:var(--neutral-bg);border-color:var(--action)}
+.drop input{position:absolute;opacity:0;width:0;height:0}
+.drop .di{width:30px;height:30px;border-radius:50%;background:var(--neutral-bg);display:grid;place-items:center;margin:0 auto 9px}
+.drop .di svg{width:15px;height:15px;stroke:var(--action);stroke-width:2;fill:none}
+.drop .dt{font-size:13px;font-weight:600}
+.drop .dt b{color:var(--action)}
+.drop .ds{font-size:11px;color:var(--gray);margin-top:4px}
+.flist{margin-top:12px;display:flex;flex-direction:column;gap:7px}
+.frow{
+  display:flex;align-items:center;gap:11px;border:1px solid var(--divider);
+  border-radius:6px;padding:9px 11px;background:#fff;animation:rowin .28s ease-out;
+}
+.frow .fi{width:26px;height:26px;border-radius:5px;background:var(--neutral-bg);display:grid;place-items:center;flex:none}
+.frow .fi svg{width:13px;height:13px;stroke:var(--action);stroke-width:2;fill:none}
+.frow .fn{flex:1;min-width:0;font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.frow .fs{font-size:11px;color:var(--gray);flex:none;font-family:'SF Mono','Fira Code',monospace}
+
+/* ---------- billing entity blocks ---------- */
+.ent{border:1px solid var(--divider);border-radius:var(--radius);padding:20px 22px;margin-bottom:14px;background:#fbfbfd;animation:rowin .28s ease-out}
+.ent-head{display:flex;align-items:center;gap:10px;margin-bottom:18px}
+.ent-head .tag{font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--action);background:var(--neutral-bg);padding:4px 9px;border-radius:4px}
+.ent-head .sp{flex:1}
+.ent .drop{padding:16px 14px}
+.docblock{margin-top:18px}
+.docblock.bad .drop{border-color:var(--err-text);background:var(--err-bg)}
+.docblock[hidden]{display:none}
+.etbl th.bills,.etbl td[data-cell=billsUnder]{display:none}
+.etbl.with-bills th.bills,.etbl.with-bills td[data-cell=billsUnder]{display:table-cell}
+#svcTable th.bills,#svcTable td.bills{display:none}
+#svcTable.with-bills th.bills,#svcTable.with-bills td.bills{display:table-cell}
+#svcTable td.bills{width:300px}
+.allocrow{display:flex;gap:7px;align-items:center;margin-bottom:6px}
+.allocrow .selwrap{flex:1;min-width:0}
+.allocrow select{padding:8px 32px 8px 10px;font-size:13px}
+.allocrow input[type=number]{width:66px;padding:8px 8px;font-size:13px;text-align:center}
+.allocrow .chev{width:18px;height:18px;right:8px}
+.allocbox .btn.ghost{font-size:11px;padding:4px 8px;margin-top:2px}
+.allocnote{font-size:11px;color:var(--gray);margin-top:4px}
+
+/* ---------- buttons ---------- */
+.btn{
+  border:none;border-radius:var(--radius);font-size:13px;font-weight:600;
+  padding:10px 18px;cursor:pointer;transition:background .2s ease-out;
+}
+.btn.pri{background:var(--action);color:#fff}
+.btn.pri:hover{background:var(--action-dark)}
+.btn.pri:disabled{background:#c3b6de;cursor:not-allowed}
+.btn.sec{background:#fff;border:1px solid var(--field-border);color:var(--text)}
+.btn.sec:hover{background:var(--table-head)}
+.btn.ghost{background:none;color:var(--action);padding:8px 10px}
+.btn.ghost:hover{background:var(--neutral-bg)}
+.xbtn{
+  border:none;background:none;color:#b9b9c4;cursor:pointer;padding:3px;border-radius:4px;
+  line-height:0;
+}
+.xbtn:hover{color:var(--err-text);background:var(--err-bg)}
+.xbtn svg{width:13px;height:13px;stroke:currentColor;stroke-width:2.4;fill:none}
+.side-foot{padding:16px 18px;border-top:1px solid var(--divider);background:#fbfbfd}
+.side-foot .btn.pri{width:100%;padding:12px}
+.side-foot .dest{font-size:11px;color:var(--gray);margin-top:11px;line-height:1.7}
+.side-foot .dest b{color:var(--text);font-weight:600}
+.addbar{display:flex;gap:10px;align-items:center;margin-top:4px}
+
+/* ---------- done screen ---------- */
+.done{max-width:560px;margin:60px auto;text-align:center}
+.done .tick{width:52px;height:52px;border-radius:50%;background:var(--ok-bg);display:grid;place-items:center;margin:0 auto 18px}
+.done .tick svg{width:24px;height:24px;stroke:var(--ok-text);stroke-width:3;fill:none}
+.done h2{font-size:19px;margin:0 0 8px}
+.done p{color:var(--gray);font-size:13px;margin:0 auto 22px;max-width:420px}
+.payload{
+  text-align:left;background:#fbfbfd;border:1px solid var(--divider);border-radius:var(--radius);
+  padding:14px;font-family:'SF Mono','Fira Code',monospace;font-size:11px;line-height:1.6;
+  max-height:280px;overflow:auto;white-space:pre-wrap;word-break:break-word;color:#4a4a55;
+}
+.linkbtn{background:none;border:none;padding:0;font:inherit;color:inherit;text-decoration:underline;cursor:pointer;font-weight:700}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3858 1353" class="logo" fill="#503390">
+  <g transform="translate(-321.000000,1854.599738) scale(0.100000,-0.100000)">
+    <path d="M28415 18544 c-970 -48 -1461 -207 -1851 -601 -110 -113 -188 -215 -375 -498 -98 -148 -204 -308 -236 -355 l-58 -85 -5 665 -5 665 -1707 3 -1708 2 0 -6655 0 -6655 1708 2 1707 3 5 2003 5 2003 40 -53 c151 -199 489 -548 680 -701 129 -104 383 -275 506 -340 490 -259 1038 -381 1644 -364 301 9 509 36 782 103 944 231 1737 855 2265 1784 382 673 623 1469 728 2410 76 678 74 1771 -5 2440 -81 694 -245 1324 -484 1869 -410 931 -1061 1639 -1854 2015 -371 177 -768 287 -1172 326 -116 11 -492 20 -610 14z m-618 -2955 c388 -75 719 -310 974 -693 228 -343 372 -784 423 -1296 35 -358 29 -887 -14 -1210 -142 -1056 -692 -1769 -1455 -1886 -132 -21 -373 -14 -500 14 -621 138 -1090 674 -1290 1472 -68 270 -91 446 -106 798 -13 290 -1 692 26 902 80 612 297 1121 624 1462 255 266 552 419 888 458 111 12 306 3 430 -21z"/>
+  <path d="M7220 18493 c-261 -16 -630 -72 -881 -133 -1062 -261 -1845 -827 -2296 -1660 -174 -320 -299 -731 -353 -1160 -35 -277 -31 -709 9 -985 91 -625 341 -1120 782 -1550 296 -288 626 -516 1094 -756 343 -176 746 -351 1190 -517 197 -74 777 -311 943 -386 158 -71 336 -164 426 -224 108 -71 226 -193 266 -276 31 -63 34 -78 38 -183 5 -138 -7 -202 -56 -296 -91 -176 -283 -287 -567 -328 -146 -21 -493 -11 -710 22 -771 114 -1649 485 -2493 1051 -57 38 -106 68 -108 65 -4 -4 -115 -196 -189 -327 -102 -182 -354 -628 -429 -760 -152 -266 -218 -384 -306 -540 -49 -85 -151 -267 -229 -404 -78 -137 -141 -252 -141 -257 0 -17 328 -248 535 -376 578 -358 1262 -647 1950 -823 927 -238 1957 -300 2805 -169 551 85 1046 250 1472 489 519 293 945 726 1211 1232 251 477 370 976 384 1598 8 372 -17 622 -92 915 -46 180 -93 304 -182 484 -209 425 -539 786 -1028 1126 -380 265 -985 568 -1697 851 -167 66 -194 80 -180 90 15 11 15 13 -8 22 -14 6 -144 62 -290 125 -751 324 -975 446 -1133 617 -98 106 -135 209 -122 343 24 248 181 408 473 484 121 31 365 42 518 24 424 -52 1074 -247 1631 -490 213 -93 614 -300 721 -372 25 -17 49 -26 53 -22 5 5 35 58 67 118 56 105 263 490 424 790 42 77 104 192 138 255 34 63 130 241 213 395 170 317 257 480 346 643 33 62 61 119 61 125 -2 35 -601 365 -933 513 -773 346 -1609 552 -2492 614 -127 9 -702 11 -835 3z"/>
+  <path d="M12364 18327 c-2 -7 -3 -1716 -1 -3797 2 -2875 6 -3813 15 -3900 54 -505 130 -853 265 -1200 291 -750 809 -1305 1490 -1594 413 -175 847 -256 1376 -256 736 0 1333 134 1723 386 294 189 488 411 840 959 35 55 84 131 109 169 l44 69 3 -791 2 -792 1710 0 1710 0 0 5380 0 5380 -1707 -2 -1708 -3 -6 -3255 c-6 -3474 -3 -3264 -49 -3465 -61 -268 -180 -495 -350 -665 -162 -164 -344 -260 -590 -311 -133 -27 -359 -30 -497 -6 -460 82 -776 407 -898 923 -63 265 -59 7 -62 3557 l-4 3227 -1705 0 c-1383 0 -1706 -2 -1710 -13z"/>
+  <path d="M31840 18328 c0 -7 27 -94 59 -193 33 -99 110 -335 171 -525 62 -190 136 -419 165 -510 30 -91 102 -313 160 -495 59 -181 131 -404 161 -495 29 -91 86 -268 127 -395 41 -126 98 -302 127 -390 28 -88 127 -394 220 -680 93 -286 194 -599 225 -695 87 -270 246 -761 444 -1370 99 -305 202 -625 230 -710 27 -85 126 -391 220 -680 93 -289 192 -595 220 -680 91 -281 392 -1211 406 -1254 7 -22 59 -183 115 -356 56 -173 126 -391 157 -483 30 -92 53 -174 50 -181 -15 -37 -400 -241 -577 -306 -201 -73 -396 -109 -630 -117 -421 -14 -807 76 -1204 280 -61 31 -113 54 -117 51 -5 -2 -23 -33 -42 -67 -36 -68 -371 -665 -472 -842 -66 -117 -253 -449 -368 -655 -39 -69 -166 -296 -284 -504 -117 -208 -213 -382 -213 -386 0 -8 47 -34 340 -182 295 -150 594 -257 985 -353 729 -180 1528 -190 2274 -29 896 193 1677 585 2366 1188 125 109 399 389 510 521 283 338 505 677 694 1058 142 289 214 473 351 897 45 140 112 350 150 465 38 116 114 352 170 525 56 173 108 333 115 355 18 56 192 594 255 790 28 88 80 248 115 355 35 107 134 413 220 680 171 528 209 648 382 1180 181 560 321 994 365 1130 22 69 46 143 53 165 8 22 38 117 69 210 120 374 271 840 326 1010 32 99 106 326 164 505 206 639 315 978 371 1150 231 712 325 1008 325 1018 0 9 -349 12 -1508 12 l-1508 0 -26 -87 c-14 -49 -130 -428 -258 -843 -128 -415 -240 -782 -250 -815 -10 -33 -111 -364 -225 -735 -113 -371 -267 -873 -341 -1115 -187 -610 -200 -652 -249 -810 -24 -77 -66 -214 -94 -305 -27 -91 -104 -343 -171 -560 -67 -217 -162 -528 -212 -690 -49 -162 -93 -301 -97 -308 -4 -7 -34 73 -68 185 -34 109 -120 389 -193 623 -264 853 -452 1459 -587 1895 -36 116 -75 244 -88 285 -60 195 -158 509 -200 645 -25 83 -96 310 -156 505 -61 195 -130 418 -154 495 -45 145 -99 319 -280 905 -58 190 -129 417 -156 505 -28 88 -55 175 -60 193 l-11 32 -1529 0 c-1216 0 -1529 -3 -1529 -12z"/>
+  </g>
+</svg>
+</div>
+
+<div class="wrap">
+
+  <!-- ======== FORM VIEW ======== -->
+  <div id="formView">
+    <div class="crumbs">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      Support <span>/</span> Requests <span>/</span> <b>Expansion</b>
+    </div>
+    <h1>Expansion request<span id="h1dyn"></span></h1>
+
+    <div class="tabrow">
+      <button class="tab on" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h6"/></svg>
+        Request details
+      </button>
+    </div>
+
+    <div class="banner info">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+      <span>Tell us what you would like to add. We will come back to you to confirm scope and timing before anything changes on your account.</span>
+    </div>
+
+    <div class="banner ok" id="demoBanner">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+      <span>Sample view. Every field is pre-filled with data for a fictional client so you can see a completed request.
+      <button type="button" id="clearDemo" class="linkbtn">Clear it</button> to start from an empty form.</span>
+    </div>
+
+    <div class="banner err" id="topErr" hidden role="alert">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
+      <span id="topErrText"></span>
+    </div>
+
+    <div class="cols">
+      <!-- ---------- LEFT ---------- -->
+      <div>
+        <!-- requester -->
+        <div class="card">
+          <h2>Your details</h2>
+          <div class="row3">
+            <div class="field" id="f_company">
+              <label class="lbl" for="company">Company or group name <span class="req">*</span></label>
+              <input type="text" id="company" placeholder="Enter company or group name" autocomplete="organization">
+              <div class="err-msg">Company or group name is required</div>
+            </div>
+            <div class="field" id="f_country">
+              <label class="lbl" for="country">Country <span class="req">*</span></label>
+              <div class="selwrap">
+                <select id="country"><option value="">Select country</option></select>
+                <span class="chev"><svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></span>
+              </div>
+              <div class="err-msg">Select a country</div>
+            </div>
+            <div class="field" id="f_phone">
+              <label class="lbl" for="phone">Phone <span class="req">*</span></label>
+              <input type="tel" id="phone" placeholder="+971 50 000 0000" autocomplete="tel">
+              <div class="err-msg">Phone number is required</div>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="field" id="f_contact">
+              <label class="lbl" for="contact">Your name <span class="req">*</span></label>
+              <input type="text" id="contact" placeholder="Enter your name" autocomplete="name">
+              <div class="err-msg">Your name is required</div>
+            </div>
+            <div class="field" id="f_email">
+              <label class="lbl" for="email">Email <span class="req">*</span></label>
+              <input type="email" id="email" placeholder="name@company.com" autocomplete="email">
+              <div class="err-msg">Enter a valid email address</div>
+            </div>
+          </div>
+          <div class="field" id="f_scope" style="margin-bottom:0">
+            <label class="lbl">Where should this expansion sit? <span class="req">*</span></label>
+            <div class="radios">
+              <label class="radio"><input type="radio" name="scope" value="Existing account"><span class="dot"><i></i></span>Under our existing account</label>
+              <label class="radio"><input type="radio" name="scope" value="New account"><span class="dot"><i></i></span>Under a new, separate account</label>
+              <label class="radio"><input type="radio" name="scope" value="Not sure"><span class="dot"><i></i></span>Not sure, advise us</label>
+            </div>
+            <div class="err-msg">Select where the expansion should sit</div>
+          </div>
+          <div class="field" id="f_existacct" hidden style="margin:16px 0 0">
+            <label class="lbl" for="existacct">Your existing retailer / account name <span class="req">*</span></label>
+            <input type="text" id="existacct" placeholder="Enter your account name in Supy">
+            <div class="hint">Exactly as it appears in Supy, so we attach this request to the right account.</div>
+            <div class="err-msg">Tell us which existing account this belongs to</div>
+          </div>
+          <div class="field" id="f_newacct" hidden style="margin:16px 0 0">
+            <label class="lbl" for="newacct">Name for the new account <span class="req">*</span></label>
+            <input type="text" id="newacct" placeholder="Enter the new account name">
+            <div class="hint">A separate account keeps data, users and reporting apart from your existing one.</div>
+            <div class="err-msg">Name the new account</div>
+          </div>
+        </div>
+
+        <!-- what -->
+        <div class="card" style="padding-bottom:8px">
+          <h2>What are you adding?</h2>
+          <div class="field" id="f_kinds" style="margin:0 -26px">
+            <table class="tbl">
+              <thead><tr><th>Item</th><th style="text-align:right">Add</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <div class="nm">Outlets</div>
+                    <div class="sub">Restaurants, central kitchens, warehouses</div>
+                  </td>
+                  <td style="text-align:right">
+                    <button class="tog" type="button" role="switch" aria-checked="false"
+                            data-kind="branch" aria-label="Add outlets"><i></i></button>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="nm">Cost centers</div>
+                    <div class="sub">Stock holding units inside an outlet</div>
+                  </td>
+                  <td style="text-align:right">
+                    <button class="tog" type="button" role="switch" aria-checked="false"
+                            data-kind="costcenter" aria-label="Add cost centers"><i></i></button>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="nm">Services / Features</div>
+                    <div class="sub">Add on modules for your account</div>
+                  </td>
+                  <td style="text-align:right">
+                    <button class="tog" type="button" role="switch" aria-checked="false"
+                            data-kind="service" aria-label="Add services or features"><i></i></button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="err-msg" style="padding:12px 26px 0">Pick at least one thing to add</div>
+          </div>
+        </div>
+
+        <!-- items -->
+        <div class="card" id="itemsCard" hidden style="padding-bottom:18px">
+          <h2>Outlet and cost center details</h2>
+          <div class="hint" style="margin:-8px 0 14px">Add a row for each one you are adding. Outlets and cost centers can be mixed in the same request.</div>
+
+          <details class="disc">
+            <summary>
+              <svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>
+              Not sure which type to pick?
+            </summary>
+            <div class="dbody">
+              <dl class="tdefs">
+                <div class="tdef">
+                  <dt>Restaurant / Outlet</dt>
+                  <dd>Sells to guests and consumes stock. Has its own POS, stock counts and supplier orders.</dd>
+                </div>
+                <div class="tdef">
+                  <dt>Central Kitchen</dt>
+                  <dd>Produces food and sends it to other locations. Runs recipes and batch production, and issues internal transfers rather than selling to guests.</dd>
+                </div>
+                <div class="tdef">
+                  <dt>Warehouse / Store</dt>
+                  <dd>Receives and distributes stock without producing or selling it. Takes supplier deliveries, then issues to branches.</dd>
+                </div>
+                <div class="tdef">
+                  <dt>Cost center</dt>
+                  <dd>Not a location of its own. A sub unit inside an existing branch, such as a bar, banquet or staff meals, used to split cost and consumption within that branch.</dd>
+                </div>
+                <div class="tdef">
+                  <dt>Not sure</dt>
+                  <dd>Pick this and describe the setup in Details. We will advise on the right structure.</dd>
+                </div>
+              </dl>
+              <div class="tkey">
+                The quickest test: if it <b>holds its own stock and gets counted separately</b>, it is a branch, and which of the three depends on whether it sells, produces or stores. If it <b>shares another branch's stock</b> and you only need to see its costs apart, it is a cost center.
+              </div>
+            </div>
+          </details>
+
+          <div class="etbl-wrap">
+            <table class="etbl">
+              <thead>
+                <tr>
+                  <th style="width:15%">Name <span class="req">*</span></th>
+                  <th style="width:15%">Type <span class="req">*</span></th>
+                  <th style="width:15%">Belongs to outlet</th>
+                  <th style="width:17%">Address</th>
+                  <th style="width:15%">Clone setup from <span class="req">*</span></th>
+                  <th class="bills" style="width:15%">Bills under</th>
+                  <th>Details</th>
+                  <th class="rmcell"></th>
+                </tr>
+              </thead>
+              <tbody id="itemBody"></tbody>
+            </table>
+          </div>
+
+          <datalist id="outletList"></datalist>
+
+          <div class="etbl-foot">
+            <button class="btn sec" type="button" id="addRowBtn">Add another row</button>
+            <span class="hint" style="margin:0">Add as many branches or cost centers as you need.</span>
+          </div>
+
+          <ul class="hints">
+            <li><b>Name.</b> The name your team will recognise in Supy.</li>
+            <li>
+              <b>Type.</b> An outlet is a site of your own. A cost center sits inside one:
+              <dl>
+                <div><dt>Outlet</dt><span>a restaurant or store that serves guests and consumes stock.</span></div>
+                <div><dt>Central Kitchen</dt><span>an outlet that produces and transfers stock to your other sites, running recipes and batch production.</span></div>
+                <div><dt>Warehouse</dt><span>an outlet that holds and issues stock to other sites, with no production of its own.</span></div>
+                <div><dt>Cost center</dt><span>a stock holding unit inside an existing outlet, such as a bar, pastry section or banquet kitchen. It counts and costs separately but shares the outlet address.</span></div>
+              </dl>
+            </li>
+            <li><b>Belongs to outlet.</b> Cost centers only. Pick one of the outlets you are adding above, or type an existing outlet name as it appears in your account. Outlets leave this blank.</li>
+            <li><b>Address.</b> Street, area, city and country, up to 200 characters. This appears on purchase orders and delivery notes, so outlets need it and cost centers do not.</li>
+            <li><b>Clone setup from.</b> Copying an existing one is faster than building from scratch, so name the closest match on menu and suppliers. Type it as it appears in your account. Write "none" to set up fresh.</li>
+            <li><b>Details.</b> Which locations it supplies or is supplied by, target go live date, the day close time if it differs from your other sites, and anything that should differ from the setup you are copying.</li>
+          </ul>
+          <div class="err-msg" id="itemErr" style="margin-top:12px"></div>
+        </div>
+
+        <!-- services -->
+        <div class="card" id="svcCard" hidden style="padding-bottom:8px">
+          <h2>Services / Features</h2>
+          <div class="field" id="f_svc" style="margin:0 -26px">
+            <table class="tbl" id="svcTable">
+              <thead><tr>
+                <th>Service / Feature</th>
+                <th class="bills" id="svcBillsHead">Quantity</th>
+                <th style="text-align:right">Add</th>
+              </tr></thead>
+              <tbody id="svcBody"></tbody>
+            </table>
+            <div class="err-msg" style="padding:12px 26px 0">Select at least one service or feature</div>
+            <div class="hint" style="padding:12px 26px 0">Quantity is how many locations the feature applies to. If different locations bill under different entities, split the line and set a quantity for each.</div>
+          </div>
+        </div>
+
+        <!-- billing -->
+        <div class="card">
+          <h2>Billing entity</h2>
+          <div class="field" id="f_entity">
+            <label class="lbl">Will this be billed under the same trade license and legal entity as your existing locations? <span class="req">*</span></label>
+            <div class="radios">
+              <label class="radio"><input type="radio" name="entity" value="Same legal entity"><span class="dot"><i></i></span>Yes, same legal entity</label>
+              <label class="radio"><input type="radio" name="entity" value="Different legal entity"><span class="dot"><i></i></span>No, a different legal entity</label>
+              <label class="radio"><input type="radio" name="entity" value="Not sure"><span class="dot"><i></i></span>Not sure</label>
+            </div>
+            <div class="err-msg">Select an option</div>
+          </div>
+        </div>
+
+        <!-- documents -->
+        <div class="card" id="docsCard" hidden>
+          <h2>Commercial documents</h2>
+          <div class="banner info" style="margin-bottom:18px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+            <span id="docsNote">All optional. Add a billing entity here if anything you are adding trades under its own trade license. Once you add one, each row above can be pointed at the entity it bills under.</span>
+          </div>
+
+          <div id="entityList"></div>
+          <div class="err-msg" id="entErr" style="margin-bottom:12px"></div>
+
+          <button class="btn sec" type="button" id="addEntBtn">Add a billing entity</button>
+        </div>
+
+        <!-- notes -->
+        <div class="card">
+          <h2>Additional notes</h2>
+          <div class="field" style="margin:0">
+            <label class="lbl" for="notes">Anything else we should know?</label>
+            <textarea id="notes" placeholder="Optional"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- ---------- RIGHT ---------- -->
+      <div class="card side">
+        <div class="side-head">
+          <h2>Your request</h2>
+          <span class="count" id="sideCount">Total items: 0</span>
+        </div>
+        <div style="margin-top:16px">
+          <table class="tbl">
+            <thead><tr><th>Item</th><th>Type</th><th class="act"></th></tr></thead>
+            <tbody id="sumBody"></tbody>
+          </table>
+          <div class="empty" id="sumEmpty">Nothing added yet. Pick what you are adding, then build your list on the left.</div>
+        </div>
+        <div class="side-foot">
+          <button class="btn pri" type="button" id="submitBtn">Submit request</button>
+          <div class="dest">
+            Check your list above before submitting. You can add or remove items at any point.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======== DONE VIEW ======== -->
+  <div id="doneView" hidden>
+    <div class="done">
+      <div class="tick"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></div>
+      <h2>Request submitted</h2>
+      <p id="doneMsg"></p>
+      <div class="banner ok" id="doneBanner" style="text-align:left">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+        <span id="doneDest"></span>
+      </div>
+      <div class="payload" id="payloadBox" hidden></div>
+      <div style="margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+        <button class="btn sec" type="button" id="copyBtn" hidden>Copy payload</button>
+        <button class="btn pri" type="button" id="againBtn">Submit another request</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ============================================================
+   CONFIG - set these for your environment
+   ============================================================ */
+const CONFIG = {
+  // Single endpoint that receives the request and fans it out downstream.
+  // Leave as null to run in preview mode: the form validates and shows
+  // the exact JSON payload instead of posting it anywhere.
+  webhookUrl: null,
+
+  // Optional shared secret sent as a header.
+  webhookSecret: null,
+
+  // How uploaded documents are delivered.
+  //   'multipart' - the request becomes multipart/form-data: a "payload" field
+  //                 holding the JSON, plus one "documents" field per file.
+  //                 This is the right choice for real files.
+  //   'base64'    - files are embedded in the JSON as base64. Only for small
+  //                 files, and many webhook endpoints cap the body around 1 MB.
+  uploadMode: 'multipart',
+
+  // Country prefill, in order of preference:
+  //   1. detectedCountry - set server side from a geo header, the most reliable
+  //      and the only one with no runtime cost. Cloudflare gives CF-IPCountry,
+  //      Vercel x-vercel-ip-country, CloudFront CloudFront-Viewer-Country.
+  //      Render the page with: CONFIG.detectedCountry = "United Arab Emirates";
+  //   2. geoEndpoint - a JSON geo-IP lookup, e.g. 'https://ipapi.co/json/'.
+  //      Costs a request, is rate limited, and ad blockers often block it.
+  //   3. Timezone, used automatically when neither of the above is set. No
+  //      network call and no IP involved, so nothing to disclose or consent to.
+  detectedCountry: null,
+  geoEndpoint: null,
+
+  // Upload limits enforced in the browser before anything is sent.
+  maxFileMB: 10,
+  maxFiles: 8,
+  maxTotalMB: 25,
+  allowedExt: ['pdf','jpg','jpeg','png','doc','docx','xls','xlsx'],
+
+  services: [
+    { id:'accounting',  name:'Accounting Integration', desc:'Sync purchases and invoices to your accounting system' },
+    { id:'deltashare',  name:'Delta Share',            desc:'Share your Supy data into your own warehouse' },
+    { id:'invoiceinbox',name:'AI Invoice Inbox',       desc:'Invoices captured and matched automatically' },
+    { id:'forecasting', name:'Sales Forecasting',      desc:'Forecast demand to drive par levels and ordering' }
+  ]
+};
+
+/* ============================================================
+   STATE
+   ============================================================ */
+const state = { kinds:new Set(), items:[], services:new Set(), serviceAlloc:{},
+                entities:[], seq:0, eSeq:0, aSeq:0,
+                pendingTarget:null, pendingEntityId:null };
+const $  = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* ============================================================
+   BUILD DYNAMIC BITS
+   ============================================================ */
+function buildServices(){
+  $('svcBody').innerHTML = CONFIG.services.map(s => `
+    <tr>
+      <td>
+        <div class="nm">${esc(s.name)}</div>
+        <div class="sub">${esc(s.desc)}</div>
+      </td>
+      <td class="bills">
+        <div class="allocbox" data-alloc="${s.id}"></div>
+      </td>
+      <td style="text-align:right">
+        <button class="tog" type="button" role="switch" aria-checked="false"
+                data-svc="${s.id}" aria-label="Add ${esc(s.name)}"><i></i></button>
+      </td>
+    </tr>`).join('');
+
+
+
+  $('svcBody').querySelectorAll('.tog').forEach(t => {
+    t.addEventListener('click', () => {
+      const id = t.dataset.svc;
+      const on = t.getAttribute('aria-checked') === 'true';
+      t.setAttribute('aria-checked', String(!on));
+      if (on){
+        state.services.delete(id);
+        delete state.serviceAlloc[id];
+      } else {
+        state.services.add(id);
+        if (!state.serviceAlloc[id]) state.serviceAlloc[id] = [blankAlloc()];
+      }
+      clearErr('f_svc');
+      renderAlloc(id);
+      refreshBillsOptions();
+      renderSummary();
+    });
+  });
+}
+
+/* ============================================================
+   SECTION VISIBILITY
+   ============================================================ */
+function syncSections(){
+  const needsItems = state.kinds.has('branch') || state.kinds.has('costcenter');
+  $('itemsCard').hidden = !needsItems;
+  $('svcCard').hidden   = !state.kinds.has('service');
+  if (!needsItems){ state.items = [blankRow()]; itemError(''); renderItems(); }
+  if (!state.kinds.has('service') && state.services.size){
+    state.services.clear();
+    $('svcBody').querySelectorAll('.tog').forEach(t => t.setAttribute('aria-checked','false'));
+  renderAllAlloc();
+    renderSummary();
+  }
+}
+
+/* ============================================================
+   ITEMS  (inline editable table)
+   ============================================================ */
+const TYPES = ['Outlet','Central Kitchen','Warehouse','Cost center','Not sure'];
+
+function blankRow(){ return { id: ++state.seq, name:'', type:'', parentOutlet:'', address:'', cloneFrom:'', billsUnder:'', details:'' }; }
+
+// A cost center sits inside an existing outlet: it shares that address, but it
+// does need to say which outlet it belongs to. Outlets are the reverse.
+const SITE_TYPES = ['Outlet','Central Kitchen','Warehouse'];
+const isCostCenter = r => r.type === 'Cost center';
+const needsAddress = r => SITE_TYPES.includes(r.type);
+const needsParent  = r => isCostCenter(r);
+
+function rowHTML(r){
+  const opts = ['<option value="">Select type</option>']
+    .concat(TYPES.map(t => `<option${r.type === t ? ' selected' : ''}>${t}</option>`)).join('');
+  return `<tr data-row="${r.id}">
+    <td data-cell="name">
+      <input type="text" value="${esc(r.name)}" data-id="${r.id}" data-f="name"
+             placeholder="Enter name" aria-label="Name">
+    </td>
+    <td data-cell="type">
+      <div class="selwrap">
+        <select data-id="${r.id}" data-f="type" aria-label="Type">${opts}</select>
+        <span class="chev"><svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></span>
+      </div>
+    </td>
+    <td data-cell="parentOutlet">
+      <div class="combowrap">
+        <input type="text" list="outletList" value="${esc(r.parentOutlet)}"
+               data-id="${r.id}" data-f="parentOutlet"
+               placeholder="Pick or type" aria-label="Belongs to outlet">
+        <button type="button" class="chevbtn" data-picker aria-label="Show outlets in this request">
+          <svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+      </div>
+    </td>
+    <td data-cell="address">
+      <input type="text" value="${esc(r.address)}" data-id="${r.id}" data-f="address"
+             maxlength="200" placeholder="Street, area, city" aria-label="Address">
+    </td>
+    <td data-cell="cloneFrom">
+      <input type="text" value="${esc(r.cloneFrom)}" data-id="${r.id}" data-f="cloneFrom"
+             placeholder="Branch name, or none" aria-label="Clone setup from">
+    </td>
+    <td data-cell="billsUnder">
+      <div class="selwrap">
+        <select data-id="${r.id}" data-f="billsUnder" aria-label="Bills under"></select>
+        <span class="chev"><svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></span>
+      </div>
+    </td>
+    <td data-cell="details">
+      <textarea data-id="${r.id}" data-f="details"
+                placeholder="Supply route, target go live date" aria-label="Details">${esc(r.details)}</textarea>
+    </td>
+    <td class="rmcell">
+      <button class="xbtn" type="button" data-rm="${r.id}" aria-label="Remove row">
+        <svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </td>
+  </tr>`;
+}
+
+// The picker offers outlets being added in this same request. Existing outlets
+// are not knowable here, so the field stays free text as well as a list.
+function refreshOutletOptions(){
+  const names = [...new Set(
+    state.items.filter(r => !isCostCenter(r) && r.name.trim()).map(r => r.name.trim())
+  )];
+  $('outletList').innerHTML = names.map(n => `<option value="${esc(n)}"></option>`).join('');
+}
+
+function syncTypeCells(row){
+  const tr = $('itemBody').querySelector(`[data-row="${row.id}"]`);
+  if (!tr) return;
+
+  const set = (field, active, placeholder) => {
+    const cell  = tr.querySelector(`[data-cell="${field}"]`);
+    const input = cell.querySelector('input');
+    input.disabled = !active;
+    input.placeholder = active ? placeholder : 'Not needed';
+    if (!active){ row[field] = ''; input.value = ''; cell.classList.remove('bad-cell'); }
+  };
+
+  // an outlet has an address of its own; a cost center has a parent instead
+  set('address',      !isCostCenter(row) && row.type !== '', 'Street, area, city');
+  set('parentOutlet', isCostCenter(row),                     'Outlet name');
+}
+
+function renderItems(){
+  if (!state.items.length) state.items.push(blankRow());
+  $('itemBody').innerHTML = state.items.map(rowHTML).join('');
+
+  $('itemBody').querySelectorAll('[data-f]').forEach(el => {
+    const ev = el.tagName === 'SELECT' ? 'change' : 'input';
+    el.addEventListener(ev, () => {
+      const row = state.items.find(r => r.id === Number(el.dataset.id));
+      if (!row) return;
+
+      if (el.dataset.f === 'billsUnder' && el.value === ADD_ENTITY){
+        el.value = row.billsUnder;      // the sentinel is an action, not a value
+        addEntityFor({ kind:'row', id: row.id });
+        return;
+      }
+
+      row[el.dataset.f] = el.value;
+      if (el.dataset.f === 'type') syncTypeCells(row);
+      if (el.dataset.f === 'name' || el.dataset.f === 'type') refreshOutletOptions();
+      el.closest('td').classList.remove('bad-cell');
+      itemError('');
+      renderSummary();
+    });
+  });
+
+  $('itemBody').querySelectorAll('[data-rm]').forEach(b => {
+    b.addEventListener('click', () => removeRow(Number(b.dataset.rm)));
+  });
+
+  $('itemBody').querySelectorAll('[data-picker]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const input = btn.previousElementSibling;
+      input.focus();
+      try { input.showPicker(); } catch { /* older browsers: typing still filters */ }
+    });
+  });
+
+  state.items.forEach(syncTypeCells);
+  refreshOutletOptions();
+  refreshBillsOptions();
+  renderSummary();
+}
+
+function addRow(){
+  state.items.push(blankRow());
+  renderItems();
+  const rows = $('itemBody').querySelectorAll('tr');
+  const last = rows[rows.length - 1];
+  if (last){
+    last.classList.add('rowin');
+    last.querySelector('input').focus();
+  }
+}
+
+function removeRow(id){
+  state.items = state.items.filter(r => r.id !== id);
+  if (!state.items.length) state.items.push(blankRow());
+  itemError('');
+  renderItems();
+}
+
+// a row counts only once someone has actually typed in it
+const rowUsed  = r => Boolean(r.name.trim() || r.type || r.parentOutlet.trim()
+                              || r.address.trim() || r.cloneFrom.trim() || r.details.trim());
+const rowReady = r => Boolean(r.name.trim() && r.type && r.cloneFrom.trim()
+                              && (!needsAddress(r) || r.address.trim())
+                              && (!needsParent(r)  || r.parentOutlet.trim()));
+const filledRows = () => state.items.filter(rowUsed);
+
+function itemError(msg){
+  $('itemErr').textContent = msg;
+  $('itemErr').style.display = msg ? 'block' : 'none';
+}
+
+function markRowGaps(){
+  let bad = 0;
+  filledRows().forEach(r => {
+    const tr = $('itemBody').querySelector(`[data-row="${r.id}"]`);
+    if (!tr) return;
+    const checks = [['name', r.name.trim()], ['type', r.type], ['cloneFrom', r.cloneFrom.trim()]];
+    if (needsAddress(r)) checks.push(['address', r.address.trim()]);
+    if (needsParent(r))  checks.push(['parentOutlet', r.parentOutlet.trim()]);
+    if (billsRequired()) checks.push(['billsUnder', r.billsUnder]);
+    checks.forEach(([f, v]) => {
+      const cell = tr.querySelector(`[data-cell="${f}"]`);
+      if (cell) cell.classList.toggle('bad-cell', !v);
+      if (!v) bad++;
+    });
+  });
+  return bad;
+}
+
+/* ============================================================
+   BILLING ENTITIES + DOCUMENTS
+   Entities are defined once here and referenced per row above, so a client
+   opening four sites under two licenses uploads each license once.
+   ============================================================ */
+const MB = 1024 * 1024;
+const fmtSize = b => b < MB ? Math.max(1, Math.round(b / 1024)) + ' KB'
+                            : (b / MB).toFixed(1) + ' MB';
+const extOf = n => (n.split('.').pop() || '').toLowerCase();
+const DEFAULT_ENTITY = 'Our existing account entity';
+const ADD_ENTITY = '__add_entity__';
+
+// The third category is only asked for in Saudi Arabia, where a commercial
+// address document is part of the standard registration pack.
+const KSA = 'Saudi Arabia';
+const inKSA = () => $('country').value === KSA;
+const DOC_KINDS = [
+  { id:'registration', label:'Business / commercial registration',
+    hint:'CR, trade license or local equivalent' },
+  { id:'vat', label:'VAT / TRN certificate',
+    hint:'Tax registration certificate' },
+  { id:'address', label:'Commercial address documents',
+    hint:'National address or lease document', ksaOnly:true }
+];
+
+const COUNTRIES = ['United Arab Emirates','Saudi Arabia','Qatar','Kuwait','Bahrain','Oman','Egypt','Jordan','Lebanon',
+'Afghanistan','Albania','Algeria','Andorra','Angola','Antigua and Barbuda','Argentina','Armenia','Australia','Austria',
+'Azerbaijan','Bahamas','Bangladesh','Barbados','Belarus','Belgium','Belize','Benin','Bhutan','Bolivia',
+'Bosnia and Herzegovina','Botswana','Brazil','Brunei','Bulgaria','Burkina Faso','Burundi','Cambodia','Cameroon','Canada',
+'Cape Verde','Central African Republic','Chad','Chile','China','Colombia','Comoros','Congo','Costa Rica','Croatia',
+'Cuba','Cyprus','Czechia','Democratic Republic of the Congo','Denmark','Djibouti','Dominica','Dominican Republic',
+'Ecuador','El Salvador','Equatorial Guinea','Eritrea','Estonia','Eswatini','Ethiopia','Fiji','Finland','France','Gabon',
+'Gambia','Georgia','Germany','Ghana','Greece','Grenada','Guatemala','Guinea','Guinea-Bissau','Guyana','Haiti','Honduras',
+'Hong Kong','Hungary','Iceland','India','Indonesia','Iran','Iraq','Ireland','Israel','Italy','Ivory Coast','Jamaica',
+'Japan','Kazakhstan','Kenya','Kiribati','Kosovo','Kyrgyzstan','Laos','Latvia','Lesotho','Liberia','Libya',
+'Liechtenstein','Lithuania','Luxembourg','Macao','Madagascar','Malawi','Malaysia','Maldives','Mali','Malta',
+'Marshall Islands','Mauritania','Mauritius','Mexico','Micronesia','Moldova','Monaco','Mongolia','Montenegro','Morocco',
+'Mozambique','Myanmar','Namibia','Nauru','Nepal','Netherlands','New Zealand','Nicaragua','Niger','Nigeria',
+'North Korea','North Macedonia','Norway','Pakistan','Palau','Palestine','Panama','Papua New Guinea','Paraguay','Peru',
+'Philippines','Poland','Portugal','Romania','Russia','Rwanda','Saint Kitts and Nevis','Saint Lucia',
+'Saint Vincent and the Grenadines','Samoa','San Marino','Sao Tome and Principe','Senegal','Serbia','Seychelles',
+'Sierra Leone','Singapore','Slovakia','Slovenia','Solomon Islands','Somalia','South Africa','South Korea','South Sudan',
+'Spain','Sri Lanka','Sudan','Suriname','Sweden','Switzerland','Syria','Taiwan','Tajikistan','Tanzania','Thailand',
+'Timor-Leste','Togo','Tonga','Trinidad and Tobago','Tunisia','Turkey','Turkmenistan','Tuvalu','Uganda','Ukraine',
+'United Kingdom','United States','Uruguay','Uzbekistan','Vanuatu','Vatican City','Venezuela','Vietnam','Yemen',
+'Zambia','Zimbabwe'];
+
+// Enough coverage for the markets Supy operates in, plus the majors. An
+// unmapped zone simply leaves the field blank rather than guessing wrong.
+const TZ_COUNTRY = {
+  'Asia/Dubai':'United Arab Emirates','Asia/Riyadh':'Saudi Arabia','Asia/Qatar':'Qatar',
+  'Asia/Kuwait':'Kuwait','Asia/Bahrain':'Bahrain','Asia/Muscat':'Oman','Asia/Aden':'Yemen',
+  'Africa/Cairo':'Egypt','Asia/Amman':'Jordan','Asia/Beirut':'Lebanon','Asia/Damascus':'Syria',
+  'Asia/Baghdad':'Iraq','Asia/Jerusalem':'Israel','Asia/Gaza':'Palestine','Asia/Hebron':'Palestine',
+  'Africa/Casablanca':'Morocco','Africa/Algiers':'Algeria','Africa/Tunis':'Tunisia','Africa/Tripoli':'Libya',
+  'Africa/Khartoum':'Sudan','Africa/Lagos':'Nigeria','Africa/Nairobi':'Kenya','Africa/Accra':'Ghana',
+  'Africa/Johannesburg':'South Africa','Africa/Addis_Ababa':'Ethiopia',
+  'Europe/London':'United Kingdom','Europe/Dublin':'Ireland','Europe/Paris':'France','Europe/Berlin':'Germany',
+  'Europe/Madrid':'Spain','Europe/Rome':'Italy','Europe/Amsterdam':'Netherlands','Europe/Brussels':'Belgium',
+  'Europe/Zurich':'Switzerland','Europe/Vienna':'Austria','Europe/Stockholm':'Sweden','Europe/Oslo':'Norway',
+  'Europe/Copenhagen':'Denmark','Europe/Helsinki':'Finland','Europe/Lisbon':'Portugal','Europe/Athens':'Greece',
+  'Europe/Warsaw':'Poland','Europe/Prague':'Czechia','Europe/Budapest':'Hungary','Europe/Bucharest':'Romania',
+  'Europe/Istanbul':'Turkey','Europe/Moscow':'Russia','Europe/Kyiv':'Ukraine','Europe/Kiev':'Ukraine',
+  'Asia/Karachi':'Pakistan','Asia/Kolkata':'India','Asia/Calcutta':'India','Asia/Colombo':'Sri Lanka',
+  'Asia/Dhaka':'Bangladesh','Asia/Kathmandu':'Nepal','Asia/Tehran':'Iran','Asia/Tashkent':'Uzbekistan',
+  'Asia/Almaty':'Kazakhstan','Asia/Baku':'Azerbaijan','Asia/Tbilisi':'Georgia','Asia/Yerevan':'Armenia',
+  'Asia/Bangkok':'Thailand','Asia/Singapore':'Singapore','Asia/Kuala_Lumpur':'Malaysia','Asia/Jakarta':'Indonesia',
+  'Asia/Manila':'Philippines','Asia/Ho_Chi_Minh':'Vietnam','Asia/Hong_Kong':'Hong Kong','Asia/Macau':'Macao',
+  'Asia/Shanghai':'China','Asia/Taipei':'Taiwan','Asia/Seoul':'South Korea','Asia/Tokyo':'Japan',
+  'Australia/Sydney':'Australia','Australia/Melbourne':'Australia','Australia/Perth':'Australia',
+  'Australia/Brisbane':'Australia','Pacific/Auckland':'New Zealand',
+  'America/New_York':'United States','America/Chicago':'United States','America/Denver':'United States',
+  'America/Los_Angeles':'United States','America/Phoenix':'United States','America/Anchorage':'United States',
+  'America/Toronto':'Canada','America/Vancouver':'Canada','America/Edmonton':'Canada',
+  'America/Mexico_City':'Mexico','America/Bogota':'Colombia','America/Lima':'Peru','America/Santiago':'Chile',
+  'America/Sao_Paulo':'Brazil','America/Argentina/Buenos_Aires':'Argentina'
+};
+
+// A prefill, never a lock: the customer can always change it, and a wrong
+// guess is visible rather than silent because the field says where it came from.
+async function detectCountry(){
+  const sel = $('country');
+  if (sel.value) return;
+
+  let guess = CONFIG.detectedCountry || null;
+
+  if (!guess && CONFIG.geoEndpoint){
+    try {
+      const res = await fetch(CONFIG.geoEndpoint, { cache:'no-store' });
+      if (res.ok){
+        const j = await res.json();
+        guess = j.country_name || j.country || null;
+      }
+    } catch { /* offline, blocked or rate limited: fall through to timezone */ }
+  }
+
+  if (!guess){
+    try { guess = TZ_COUNTRY[Intl.DateTimeFormat().resolvedOptions().timeZone] || null; }
+    catch { guess = null; }
+  }
+
+  if (!guess || sel.value) return;
+  if (![...sel.options].some(o => o.value === guess)) return;
+
+  sel.value = guess;
+  syncKsaBlocks();
+}
+
+const entityById = id => state.entities.find(e => e.id === id);
+const entityNames = () => state.entities.filter(e => e.name.trim()).map(e => e.name.trim());
+const entityFiles = e => DOC_KINDS.flatMap(k => e.docs[k.id]);
+const allFiles = () => state.entities.flatMap(entityFiles);
+
+function blankEntity(){
+  return { id: ++state.eSeq, name:'', regNumber:'', trn:'',
+           docs: { registration:[], vat:[], address:[] } };
+}
+
+function dropHTML(e, kind){
+  const optional = ' <span class="req">*</span>';   // every visible pack is required
+  return `<div class="docblock" data-dockind="${kind.id}" data-ent="${e.id}"${kind.ksaOnly && !inKSA() ? ' hidden' : ''}>
+    <label class="lbl">${esc(kind.label)}${optional}</label>
+    <label class="drop" for="docs-${e.id}-${kind.id}">
+      <input type="file" id="docs-${e.id}-${kind.id}" data-eid="${e.id}" data-kind="${kind.id}" multiple
+             accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx">
+      <span class="di"><svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M12 16V4M7 9l5-5 5 5M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg></span>
+      <span class="dt"><b>Choose files</b> or drag them here</span>
+      <span class="ds">${esc(kind.hint)}. PDF, JPG, PNG, Word or Excel, up to ${CONFIG.maxFileMB} MB each.</span>
+    </label>
+    <div class="flist" data-flist="${e.id}-${kind.id}"></div>
+  </div>`;
+}
+
+function entityHTML(e, i){
+  return `<div class="ent" data-ent="${e.id}">
+    <div class="ent-head">
+      <span class="tag">Entity ${i + 1}</span>
+      <span class="sp"></span>
+      <button class="xbtn" type="button" data-rment="${e.id}" aria-label="Remove entity ${i + 1}">
+        <svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="field">
+      <label class="lbl">Legal entity name <span class="req">*</span></label>
+      <input type="text" value="${esc(e.name)}" data-eid="${e.id}" data-ef="name"
+             placeholder="Registered name" aria-label="Legal entity name">
+      <div class="hint">This is what you will pick from in the Bills under columns.</div>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label class="lbl">CRN / trade license / business registration number <span class="req">*</span></label>
+        <input type="text" value="${esc(e.regNumber)}" data-eid="${e.id}" data-ef="regNumber"
+               placeholder="Enter registration or license number">
+      </div>
+      <div class="field">
+        <label class="lbl">TRN / VAT number <span class="req">*</span></label>
+        <input type="text" value="${esc(e.trn)}" data-eid="${e.id}" data-ef="trn" placeholder="Enter TRN or VAT number">
+      </div>
+    </div>
+    ${DOC_KINDS.map(k => dropHTML(e, k)).join('')}
+  </div>`;
+}
+
+function renderEntities(){
+  $('entityList').innerHTML = state.entities.map(entityHTML).join('');
+
+  $('entityList').querySelectorAll('[data-ef]').forEach(el => {
+    const ev = el.tagName === 'SELECT' ? 'change' : 'input';
+    el.addEventListener(ev, () => {
+      const e = entityById(Number(el.dataset.eid));
+      if (!e) return;
+      e[el.dataset.ef] = el.value;
+      entError('');
+      const fw = el.closest('.field');
+      if (fw) fw.classList.remove('bad');
+
+      if (el.dataset.ef === 'name'){
+        if (state.pendingEntityId === e.id && state.pendingTarget){
+          const t = state.pendingTarget;
+          if (t.kind === 'row'){
+            const row = state.items.find(r => r.id === t.id);
+            if (row) row.billsUnder = e.name.trim();
+          } else if (t.kind === 'alloc'){
+            const line = allocLines(t.id).find(l => l.id === t.lineId);
+            if (line) line.entity = e.name.trim();
+          }
+        }
+        refreshBillsOptions();
+        renderAllAlloc();
+        renderItems();
+        renderSummary();
+      }
+    });
+  });
+
+  $('entityList').querySelectorAll('[data-rment]').forEach(b => {
+    b.addEventListener('click', () => {
+      const id = Number(b.dataset.rment);
+      if (state.pendingEntityId === id){ state.pendingTarget = null; state.pendingEntityId = null; }
+      removeEntity(id);
+    });
+  });
+
+  $('entityList').querySelectorAll('input[type=file]').forEach(inp => {
+    inp.addEventListener('change', ev => {
+      addFiles(Number(inp.dataset.eid), inp.dataset.kind, ev.target.files);
+      ev.target.value = '';
+    });
+  });
+
+  $('entityList').querySelectorAll('.drop').forEach(dz => {
+    const inp  = dz.querySelector('input[type=file]');
+    const eid  = Number(inp.dataset.eid);
+    const kind = inp.dataset.kind;
+    ['dragenter','dragover'].forEach(t => dz.addEventListener(t, ev => { ev.preventDefault(); dz.classList.add('over'); }));
+    ['dragleave','drop'].forEach(t => dz.addEventListener(t, ev => { ev.preventDefault(); dz.classList.remove('over'); }));
+    dz.addEventListener('drop', ev => {
+      if (ev.dataTransfer && ev.dataTransfer.files.length) addFiles(eid, kind, ev.dataTransfer.files);
+    });
+  });
+
+  state.entities.forEach(e => DOC_KINDS.forEach(k => renderFiles(e.id, k.id)));
+  refreshBillsOptions();
+  renderAllAlloc();
+  renderSummary();
+}
+
+// Saudi registrations need a commercial address document, so the block follows
+// the country chosen in Your details rather than being asked per entity.
+function syncKsaBlocks(){
+  const show = inKSA();
+  $('entityList').querySelectorAll('.docblock[data-dockind="address"]').forEach(b => b.hidden = !show);
+  if (!show){
+    let cleared = false;
+    state.entities.forEach(e => {
+      if (e.docs.address.length){ e.docs.address = []; renderFiles(e.id, 'address'); cleared = true; }
+    });
+    if (cleared) renderSummary();
+  }
+}
+
+function addEntityFor(target){
+  const e = blankEntity();
+  state.entities.push(e);
+  state.pendingTarget = target;      // { kind:'row'|'alloc', id, lineId? }
+  state.pendingEntityId = e.id;
+  renderEntities();
+  const block = $('entityList').querySelector(`[data-ent="${e.id}"]`);
+  if (block){
+    if (typeof block.scrollIntoView === 'function') block.scrollIntoView({ behavior:'smooth', block:'center' });
+    block.querySelector('input').focus({ preventScroll:true });
+  }
+}
+
+function addEntity(){
+  state.entities.push(blankEntity());
+  renderEntities();
+  const blocks = $('entityList').querySelectorAll('.ent');
+  const last = blocks[blocks.length - 1];
+  if (last) last.querySelector('input').focus();
+}
+
+function removeEntity(id){
+  const gone = entityById(id);
+  const name = gone ? gone.name.trim() : '';
+  state.entities = state.entities.filter(e => e.id !== id);
+  if (name){
+    state.items.forEach(r => { if (r.billsUnder === name) r.billsUnder = ''; });
+    Object.values(state.serviceAlloc).forEach(lines => lines.forEach(l => {
+      if (l.entity === name) l.entity = '';
+    }));
+  }
+  entError('');
+  renderEntities();
+  renderItems();
+}
+
+function entError(msg){
+  $('entErr').textContent = msg;
+  $('entErr').style.display = msg ? 'block' : 'none';
+}
+
+/* ---------- files, scoped to an entity and a document category ---------- */
+function addFiles(entityId, kind, fileList){
+  const e = entityById(entityId);
+  if (!e || !e.docs[kind]) return;
+  const rejected = [];
+  let count = allFiles().length;
+  let total = allFiles().reduce((s, f) => s + f.size, 0);
+
+  for (const f of fileList){
+    if (count >= CONFIG.maxFiles){ rejected.push('only ' + CONFIG.maxFiles + ' files in total'); break; }
+    if (!CONFIG.allowedExt.includes(extOf(f.name))){ rejected.push(f.name + ' is not a supported file type'); continue; }
+    if (f.size > CONFIG.maxFileMB * MB){ rejected.push(f.name + ' is over ' + CONFIG.maxFileMB + ' MB'); continue; }
+    if (total + f.size > CONFIG.maxTotalMB * MB){ rejected.push('total upload would pass ' + CONFIG.maxTotalMB + ' MB'); continue; }
+    if (e.docs[kind].some(x => x.name === f.name && x.size === f.size)) continue;
+    e.docs[kind].push(f); count++; total += f.size;
+  }
+
+  entError(rejected.length ? 'Not added: ' + [...new Set(rejected)].join('. ') + '.' : '');
+  const db = $('entityList').querySelector(`.docblock[data-ent="${entityId}"][data-dockind="${kind}"]`);
+  if (db && e.docs[kind].length) db.classList.remove('bad');
+  renderFiles(entityId, kind);
+  renderSummary();
+}
+
+function removeFile(entityId, kind, i){
+  const e = entityById(entityId);
+  if (!e) return;
+  e.docs[kind].splice(i, 1);
+  entError('');
+  renderFiles(entityId, kind);
+  renderSummary();
+}
+
+function renderFiles(entityId, kind){
+  const e = entityById(entityId);
+  const box = $('entityList').querySelector(`[data-flist="${entityId}-${kind}"]`);
+  if (!e || !box) return;
+  box.innerHTML = e.docs[kind].map((f, i) => `
+    <div class="frow">
+      <span class="fi"><svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M14 3v5h5M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/></svg></span>
+      <span class="fn" title="${esc(f.name)}">${esc(f.name)}</span>
+      <span class="fs">${fmtSize(f.size)}</span>
+      <button class="xbtn" type="button" data-rmf="${i}" aria-label="Remove ${esc(f.name)}">
+        <svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>`).join('');
+  box.querySelectorAll('[data-rmf]').forEach(b => {
+    b.addEventListener('click', ev => { ev.preventDefault(); removeFile(entityId, kind, Number(b.dataset.rmf)); });
+  });
+}
+
+/* ---------- billing entity options, shared by both tables ----------
+   With no entities defined there is nothing to choose, so the column is hidden
+   and everything bills to the account entity. As soon as one exists the choice
+   is real, so the field starts blank and has to be answered.                */
+function billsOptionsHTML(current){
+  const names = entityNames();
+  if (!names.length) return `<option value="">${DEFAULT_ENTITY}</option>`;
+
+  return [`<option value=""${current ? '' : ' selected'}>Select entity</option>`,
+          `<option${current === DEFAULT_ENTITY ? ' selected' : ''}>${DEFAULT_ENTITY}</option>`]
+    .concat(names.map(n => `<option${current === n ? ' selected' : ''}>${esc(n)}</option>`))
+    .concat($('docsCard').hidden ? [] : [`<option value="${ADD_ENTITY}">+ Add a billing entity</option>`])
+    .join('');
+}
+
+const billsRequired = () => entityNames().length > 0;
+
+/* ---------- feature allocations ----------
+   A feature can be split across entities: five AI Invoice Inbox under one
+   entity and three under another. Each line is an entity plus a quantity.   */
+function blankAlloc(){ return { id: ++state.aSeq, entity:'', qty:1 }; }
+
+const allocLines = id => state.serviceAlloc[id] || [];
+const allocTotal = id => allocLines(id).reduce((s, l) => s + (Number(l.qty) || 0), 0);
+
+function renderAlloc(svcId){
+  const box = $('svcBody').querySelector(`[data-alloc="${svcId}"]`);
+  if (!box) return;
+  if (!state.services.has(svcId)){ box.innerHTML = ''; return; }
+
+  const lines = allocLines(svcId);
+  const split = billsRequired();
+
+  box.innerHTML = lines.map(l => `
+    <div class="allocrow" data-line="${l.id}">
+      ${split ? `<div class="selwrap">
+        <select data-alloc-ent="${svcId}" data-line="${l.id}" aria-label="Bills under">${billsOptionsHTML(l.entity)}</select>
+        <span class="chev"><svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></span>
+      </div>` : ''}
+      <input type="number" min="1" step="1" value="${esc(l.qty)}"
+             data-alloc-qty="${svcId}" data-line="${l.id}" aria-label="Quantity">
+      ${lines.length > 1 ? `<button class="xbtn" type="button" data-alloc-rm="${svcId}" data-line="${l.id}" aria-label="Remove split">
+        <svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>` : ''}
+    </div>`).join('')
+    + (split ? `<button class="btn ghost" type="button" data-alloc-add="${svcId}">+ Split across entities</button>` : '')
+    + (lines.length > 1 ? `<div class="allocnote">Total: ${allocTotal(svcId)}</div>` : '');
+
+  box.querySelectorAll('[data-alloc-ent]').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const line = allocLines(svcId).find(l => l.id === Number(sel.dataset.line));
+      if (!line) return;
+      if (sel.value === ADD_ENTITY){
+        sel.value = line.entity;
+        addEntityFor({ kind:'alloc', id: svcId, lineId: line.id });
+        return;
+      }
+      line.entity = sel.value;
+      sel.closest('td').classList.remove('bad-cell');
+      renderSummary();
+    });
+  });
+
+  box.querySelectorAll('[data-alloc-qty]').forEach(inp => {
+    inp.addEventListener('input', () => {
+      const line = allocLines(svcId).find(l => l.id === Number(inp.dataset.line));
+      if (!line) return;
+      line.qty = inp.value;
+      inp.closest('td').classList.remove('bad-cell');
+      const note = box.querySelector('.allocnote');
+      if (note) note.textContent = 'Total: ' + allocTotal(svcId);
+      renderSummary();
+    });
+  });
+
+  box.querySelectorAll('[data-alloc-add]').forEach(b => {
+    b.addEventListener('click', () => {
+      state.serviceAlloc[svcId].push(blankAlloc());
+      renderAlloc(svcId);
+      renderSummary();
+    });
+  });
+
+  box.querySelectorAll('[data-alloc-rm]').forEach(b => {
+    b.addEventListener('click', () => {
+      state.serviceAlloc[svcId] = allocLines(svcId).filter(l => l.id !== Number(b.dataset.line));
+      renderAlloc(svcId);
+      renderSummary();
+    });
+  });
+}
+
+function renderAllAlloc(){ CONFIG.services.forEach(s => renderAlloc(s.id)); }
+
+function refreshBillsOptions(){
+  const names = entityNames();
+  document.querySelector('.etbl').classList.toggle('with-bills', names.length > 0);
+  $('svcTable').classList.toggle('with-bills', state.services.size > 0);
+  $('svcBillsHead').textContent = names.length ? 'Billing and quantity' : 'Quantity';
+
+  $('itemBody').querySelectorAll('select[data-f="billsUnder"]').forEach(sel => {
+    const row = state.items.find(r => r.id === Number(sel.dataset.id));
+    const current = row ? row.billsUnder : '';
+    sel.innerHTML = billsOptionsHTML(current);
+    if (row && current && !names.includes(current)) row.billsUnder = '';
+  });
+}
+
+const readAsBase64 = file => new Promise((res, rej) => {
+  const r = new FileReader();
+  r.onload  = () => res(String(r.result).split(',')[1]);
+  r.onerror = () => rej(new Error('Could not read ' + file.name));
+  r.readAsDataURL(file);
+});
+
+/* ============================================================
+   SUMMARY PANEL
+   ============================================================ */
+function renderSummary(){
+  const rows = [];
+
+  const named = state.items.filter(i => i.name.trim());
+  const groups = [
+    { label:'Outlets',      list: named.filter(i => i.type !== 'Cost center') },
+    { label:'Cost centers', list: named.filter(i => i.type === 'Cost center') }
+  ];
+  groups.filter(g => g.list.length).forEach(g => {
+    rows.push(`<tr class="grp"><td colspan="3">${g.label}</td></tr>`);
+    g.list.forEach(i => {
+      rows.push(`<tr class="rowin">
+        <td><div class="nm">${esc(i.name)}</div></td>
+        <td><span class="badge">${esc(i.type || 'No type')}</span></td>
+        <td class="act"></td></tr>`);
+    });
+  });
+
+  if (state.services.size){
+    rows.push(`<tr class="grp"><td colspan="3">Services / Features</td></tr>`);
+    CONFIG.services.filter(s => state.services.has(s.id)).forEach(s => {
+      const lines = allocLines(s.id);
+      const detail = lines
+        .filter(l => l.entity || lines.length > 1 || Number(l.qty) > 1)
+        .map(l => `${Number(l.qty) || 0} \u00d7 ${esc(l.entity || DEFAULT_ENTITY)}`)
+        .join('\n');
+      rows.push(`<tr class="rowin">
+        <td><div class="nm">${esc(s.name)}</div>${detail ? `<div class="sub">${detail}</div>` : ''}</td>
+        <td><span class="badge">Feature</span></td>
+        <td class="act"></td></tr>`);
+    });
+  }
+
+  if (allFiles().length){
+    rows.push(`<tr class="grp"><td colspan="3">Documents</td></tr>`);
+    state.entities.forEach(e => DOC_KINDS.forEach(k => e.docs[k.id].forEach(f => {
+      rows.push(`<tr class="rowin">
+        <td><div class="nm">${esc(f.name)}</div>
+            <div class="sub">${fmtSize(f.size)}${e.name.trim() ? ' \u00b7 ' + esc(e.name.trim()) : ''}</div></td>
+        <td><span class="badge">${esc(k.id === 'vat' ? 'VAT' : k.id === 'registration' ? 'Registration' : 'Address')}</span></td>
+        <td class="act"></td></tr>`);
+    })));
+  }
+
+  $('sumBody').innerHTML = rows.join('');
+  const total = named.length + state.services.size + allFiles().length;
+  $('sumEmpty').hidden = total > 0;
+  $('sideCount').textContent = 'Total items: ' + total;
+
+
+}
+
+/* ============================================================
+   VALIDATION
+   ============================================================ */
+const setErr   = id => $(id).classList.add('bad');
+const clearErr = id => $(id).classList.remove('bad');
+function showTop(msg){ $('topErrText').textContent = msg; $('topErr').hidden = false; }
+function hideTop(){ $('topErr').hidden = true; }
+
+function validate(){
+  ['f_company','f_country','f_contact','f_email','f_phone','f_scope','f_newacct','f_existacct','f_kinds','f_svc','f_entity'].forEach(clearErr);
+  const problems = [];
+
+  if (!$('company').value.trim()){ setErr('f_company'); problems.push('your company or group name'); }
+  if (!$('country').value){ setErr('f_country'); problems.push('your country'); }
+  if (!$('contact').value.trim()){ setErr('f_contact'); problems.push('your name'); }
+  if (!$('phone').value.trim()){ setErr('f_phone'); problems.push('a phone number'); }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test($('email').value.trim())){ setErr('f_email'); problems.push('a valid email'); }
+  const scope = document.querySelector('input[name=scope]:checked');
+  if (!scope){ setErr('f_scope'); problems.push('where the expansion should sit'); }
+  if (scope && scope.value === 'New account' && !$('newacct').value.trim()){
+    setErr('f_newacct'); problems.push('the new account name');
+  }
+  if (scope && scope.value === 'Existing account' && !$('existacct').value.trim()){
+    setErr('f_existacct'); problems.push('your existing account name');
+  }
+  if (!state.kinds.size){ setErr('f_kinds'); problems.push('what you are adding'); }
+
+  const needsItems = state.kinds.has('branch') || state.kinds.has('costcenter');
+  itemError('');
+  if (needsItems){
+    const gaps = markRowGaps();
+    if (!filledRows().length){
+      itemError('Add at least one outlet or cost center.');
+      problems.push('at least one outlet or cost center');
+    } else if (gaps){
+      itemError('Every row needs a name, a type and a clone source. Outlets also need an address, cost centers need the outlet they belong to, and once you add a billing entity every row needs one. Write "none" as a clone source to set up fresh.');
+      problems.push('the highlighted rows completed');
+    }
+  }
+  if (state.kinds.has('service') && !state.services.size){ setErr('f_svc'); problems.push('at least one service or feature'); }
+
+  $('svcBody').querySelectorAll('td.bills').forEach(td => td.classList.remove('bad-cell'));
+  let missingEntity = 0, badQty = 0;
+  CONFIG.services.filter(s => state.services.has(s.id)).forEach(s => {
+    const cell = $('svcBody').querySelector(`[data-alloc="${s.id}"]`);
+    allocLines(s.id).forEach(l => {
+      const noEntity = billsRequired() && !l.entity;
+      const noQty    = !(Number(l.qty) >= 1);
+      if (noEntity) missingEntity++;
+      if (noQty) badQty++;
+      if ((noEntity || noQty) && cell) cell.closest('td').classList.add('bad-cell');
+    });
+  });
+  if (missingEntity) problems.push('a billing entity on each feature line');
+  if (badQty) problems.push('a quantity of at least 1 on each feature line');
+
+  const entity = document.querySelector('input[name=entity]:checked');
+  if (!entity){ setErr('f_entity'); problems.push('the billing entity answer'); }
+  entError('');
+  $('entityList').querySelectorAll('.field, .docblock').forEach(el => el.classList.remove('bad'));
+
+  if (entity && entity.value === 'Different legal entity' && !state.entities.length){
+    entError('Add the billing entity below so we know who to invoice.');
+    problems.push('the billing entity details');
+  }
+
+  const gaps = new Set();
+  state.entities.forEach(e => {
+    const block = $('entityList').querySelector(`[data-ent="${e.id}"]`);
+    const flagField = ef => {
+      const input = block && block.querySelector(`[data-ef="${ef}"]`);
+      if (input) input.closest('.field').classList.add('bad');
+    };
+    if (!e.name.trim()){      flagField('name');      gaps.add('a name'); }
+    if (!e.regNumber.trim()){ flagField('regNumber'); gaps.add('a registration or license number'); }
+    if (!e.trn.trim()){       flagField('trn');       gaps.add('a TRN or VAT number'); }
+    // in Saudi the commercial address pack is part of the standard set
+    DOC_KINDS.filter(k => !k.ksaOnly || inKSA()).forEach(k => {
+      if (e.docs[k.id].length) return;
+      const db = block && block.querySelector(`.docblock[data-dockind="${k.id}"]`);
+      if (db) db.classList.add('bad');
+      gaps.add(k.id === 'vat' ? 'a VAT certificate'
+             : k.id === 'address' ? 'a commercial address document'
+             : 'a registration document');
+    });
+  });
+
+  if (gaps.size){
+    entError('Each billing entity needs ' + [...gaps].join(', ') + '.');
+    problems.push('the billing entity details completed');
+  }
+
+  if (problems.length){
+    showTop('Still needed: ' + problems.join(', ') + '.');
+    scrollToFirstProblem();
+    return false;
+  }
+  hideTop();
+  return true;
+}
+
+/* ============================================================
+   PAYLOAD + SUBMIT
+   ============================================================ */
+function buildPayload(){
+  const entity = document.querySelector('input[name=entity]:checked');
+  const scope  = document.querySelector('input[name=scope]:checked');
+  const rows   = filledRows().filter(rowReady);
+  const cc     = rows.filter(i => i.type === 'Cost center');
+  const br     = rows.filter(i => i.type !== 'Cost center');
+  return {
+    type: 'expansion_request',
+    submittedAt: new Date().toISOString(),
+    accountScope: {
+      target:              scope ? scope.value : null,
+      existingAccountName: $('existacct').value.trim() || null,
+      newAccountName:      $('newacct').value.trim() || null
+    },
+    counts: { outlets: br.length, costCenters: cc.length, features: state.services.size },
+    requester: {
+      account: $('company').value.trim(),
+      country: $('country').value || null,
+      name:    $('contact').value.trim(),
+      email:   $('email').value.trim(),
+      phone:   $('phone').value.trim() || null
+    },
+    adding: [...state.kinds],
+    items: rows.map(r => ({
+      name: r.name.trim(),
+      type: r.type,
+      address: needsAddress(r) ? r.address.trim() : null,
+      parentOutlet: needsParent(r) ? r.parentOutlet.trim() : null,
+      cloneFrom: r.cloneFrom.trim(),
+      billsUnder: r.billsUnder || DEFAULT_ENTITY,
+      details: r.details.trim() || null
+    })),
+    features: CONFIG.services.filter(s => state.services.has(s.id)).map(s => ({
+      name: s.name,
+      totalQuantity: allocTotal(s.id),
+      allocations: allocLines(s.id).map(l => ({
+        billsUnder: l.entity || DEFAULT_ENTITY,
+        quantity: Number(l.qty) || 0
+      }))
+    })),
+    billing: {
+      sameLegalEntity: entity ? entity.value : null,
+      entities: state.entities.filter(e => e.name.trim()).map(e => ({
+        name:               e.name.trim(),
+        registrationNumber: e.regNumber.trim() || null,
+        trn:                e.trn.trim() || null,
+        documents:    DOC_KINDS.reduce((acc, k) => {
+          acc[k.id] = e.docs[k.id].map(f => ({
+            filename: f.name, sizeBytes: f.size, type: f.type || extOf(f.name)
+          }));
+          return acc;
+        }, {})
+      }))
+    },
+    documents: state.entities.flatMap(e =>
+      DOC_KINDS.flatMap(k => e.docs[k.id].map(f => ({
+        filename: f.name, sizeBytes: f.size, type: f.type || extOf(f.name),
+        category: k.id, billingEntity: e.name.trim() || null
+      })))),
+    notes: $('notes').value.trim() || null,
+    summary: buildSubject()
+  };
+}
+
+function buildSubject(){
+  const bits = [];
+  const rows = filledRows().filter(rowReady);
+  const cc = rows.filter(i => i.type === 'Cost center').length;
+  const br = rows.length - cc;
+  if (br) bits.push(br + (br === 1 ? ' outlet' : ' outlets'));
+  if (cc) bits.push(cc + (cc === 1 ? ' cost center' : ' cost centers'));
+  if (state.services.size) bits.push(state.services.size + (state.services.size === 1 ? ' feature' : ' features'));
+  return 'Expansion request: ' + ($('company').value.trim() || 'account') + ' (' + (bits.join(', ') || 'no items') + ')';
+}
+
+// walks the page in document order so the customer is taken to the first gap,
+// whether that is a plain field or a cell inside one of the tables
+function scrollToFirstProblem(){
+  const first = document.querySelector('.field.bad, .bad-cell, .docblock.bad');
+  if (!first) return;
+  if (typeof first.scrollIntoView === 'function') first.scrollIntoView({ behavior:'smooth', block:'center' });
+  const focusable = first.querySelector('input:not([disabled]), select:not([disabled]), textarea:not([disabled])');
+  if (focusable) setTimeout(() => focusable.focus({ preventScroll:true }), 320);
+}
+
+async function submitRequest(){
+  if (!validate()) return;
+  const btn = $('submitBtn');
+  btn.disabled = true;
+  btn.textContent = 'Submitting...';
+  const payload = buildPayload();
+
+  try {
+    if (CONFIG.webhookUrl){
+      const headers = {};
+      if (CONFIG.webhookSecret) headers['X-Supy-Signature'] = CONFIG.webhookSecret;
+      let body;
+
+      if (allFiles().length && CONFIG.uploadMode === 'multipart'){
+        // multipart: the JSON travels in a "payload" field alongside the files
+        body = new FormData();
+        body.append('payload', JSON.stringify(payload));
+        // fieldname encodes which entity and which document pack each file is
+        state.entities.forEach((e, i) => DOC_KINDS.forEach(k =>
+          e.docs[k.id].forEach(f => body.append(`documents[${i}][${k.id}]`, f, f.name))));
+        // no Content-Type header: the browser sets the multipart boundary
+      } else {
+        if (allFiles().length && CONFIG.uploadMode === 'base64'){
+          btn.textContent = 'Reading files...';
+          payload.documents = await Promise.all(
+            state.entities.flatMap(e => DOC_KINDS.flatMap(k => e.docs[k.id].map(async f => ({
+              filename: f.name, sizeBytes: f.size,
+              type: f.type || extOf(f.name),
+              category: k.id,
+              billingEntity: e.name.trim() || null,
+              contentBase64: await readAsBase64(f)
+            })))));
+          btn.textContent = 'Submitting...';
+        }
+        headers['Content-Type'] = 'application/json';
+        body = JSON.stringify(payload);
+      }
+
+      const res = await fetch(CONFIG.webhookUrl, { method:'POST', headers, body });
+      if (!res.ok) throw new Error('Endpoint returned ' + res.status);
+      showDone(payload, false);
+    } else {
+      showDone(payload, true);   // preview mode
+    }
+  } catch (err){
+    btn.disabled = false;
+    btn.textContent = 'Submit request';
+    showTop('Could not submit: ' + err.message + '. Nothing was sent, so your answers are still here. Try again in a moment.');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+}
+
+function showDone(payload, preview){
+  $('formView').hidden = true;
+  $('doneView').hidden = false;
+  $('doneMsg').textContent = preview
+    ? 'Validation passed and the payload below is ready to post. Set CONFIG.webhookUrl to send it for real.'
+    : 'Your Supy team will confirm scope and timeline within one business day, and flag anything else needed from you.';
+  $('doneDest').textContent = preview
+    ? 'Preview mode: nothing was submitted.' + (allFiles().length ? ' The ' + allFiles().length + ' attached file(s) are listed in the payload but not uploaded.' : '')
+    : 'Reference: ' + payload.summary;
+  $('payloadBox').hidden = !preview;
+  $('copyBtn').hidden = !preview;
+  if (preview) $('payloadBox').textContent = JSON.stringify(payload, null, 2);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function resetAll(){
+  state.kinds.clear(); state.services.clear(); state.items = []; state.seq = 0; state.eSeq = 0;
+  itemError('');
+  state.entities = []; state.serviceAlloc = {}; state.aSeq = 0;
+  state.pendingTarget = null; state.pendingEntityId = null;
+  $('docsCard').hidden = true;
+  entError(''); renderEntities();
+  document.querySelectorAll('.tog[data-kind]').forEach(t => t.setAttribute('aria-checked','false'));
+  document.querySelectorAll('input[type=text],input[type=email],input[type=tel],textarea').forEach(i => i.value = '');
+  document.querySelectorAll('select').forEach(s => s.value = '');
+  syncKsaBlocks();
+  detectCountry();
+  document.querySelectorAll('input[name=entity],input[name=scope]').forEach(r => r.checked = false);
+  $('f_newacct').hidden = true;
+  $('f_existacct').hidden = true;
+  document.querySelectorAll('.field').forEach(f => f.classList.remove('bad'));
+  $('svcBody').querySelectorAll('.tog').forEach(t => t.setAttribute('aria-checked','false'));
+  $('h1dyn').textContent = '';
+  hideTop(); syncSections(); renderSummary();
+  const b = $('submitBtn'); b.disabled = false; b.textContent = 'Submit request';
+  $('doneView').hidden = true; $('formView').hidden = false;
+  window.scrollTo({ top: 0 });
+}
+
+/* ============================================================
+   WIRE UP
+   ============================================================ */
+document.querySelectorAll('.tog[data-kind]').forEach(t => {
+  t.addEventListener('click', () => {
+    const on = t.getAttribute('aria-checked') === 'true';
+    t.setAttribute('aria-checked', String(!on));
+    on ? state.kinds.delete(t.dataset.kind) : state.kinds.add(t.dataset.kind);
+    clearErr('f_kinds');
+    syncSections(); renderSummary();
+  });
+});
+
+document.querySelectorAll('input[name=scope]').forEach(r => {
+  r.addEventListener('change', () => {
+    $('f_newacct').hidden   = r.value !== 'New account';
+    $('f_existacct').hidden = r.value !== 'Existing account';
+    clearErr('f_scope');
+  });
+});
+
+document.querySelectorAll('input[name=entity]').forEach(r => {
+  r.addEventListener('change', () => {
+    // billing under the existing entity means there is no paperwork to collect
+    const sameEntity = r.value === 'Same legal entity';
+    $('docsCard').hidden = sameEntity;
+
+    if (sameEntity){
+      state.entities = [];
+      state.pendingTarget = null;
+      state.pendingEntityId = null;
+      state.items.forEach(row => row.billsUnder = '');
+      Object.values(state.serviceAlloc).forEach(lines => {
+        lines.length = 1;
+        lines[0].entity = '';
+      });
+      renderAllAlloc();
+      entError('');
+      renderEntities();
+      renderItems();
+    } else if (r.value === 'Different legal entity' && !state.entities.length){
+      addEntity();
+    }
+    clearErr('f_entity');
+  });
+});
+
+// echo the account name into the title, the way the portal does
+$('company').addEventListener('input', e => {
+  const v = e.target.value.trim();
+  $('h1dyn').innerHTML = v ? ' - <span class="dyn">' + esc(v) + '</span>' : '';
+});
+
+// clear the error state as soon as someone starts fixing it
+document.querySelectorAll('.field input, .field select, .field textarea').forEach(el => {
+  el.addEventListener('input', () => el.closest('.field').classList.remove('bad'));
+});
+
+$('country').innerHTML = ['<option value="">Select country</option>']
+  .concat(COUNTRIES.map(c => `<option>${esc(c)}</option>`)).join('');
+$('country').addEventListener('change', () => {
+  clearErr('f_country');
+  syncKsaBlocks();
+});
+
+$('addRowBtn').addEventListener('click', addRow);
+$('addEntBtn').addEventListener('click', addEntity);
+$('submitBtn').addEventListener('click', submitRequest);
+$('againBtn').addEventListener('click', resetAll);
+$('copyBtn').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText($('payloadBox').textContent);
+    $('copyBtn').textContent = 'Copied';
+    setTimeout(() => $('copyBtn').textContent = 'Copy payload', 1600);
+  } catch { $('copyBtn').textContent = 'Select the text above to copy'; }
+});
+
+// enter inside a row adds the next row rather than doing nothing
+$('itemBody').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.tagName === 'INPUT'){ e.preventDefault(); addRow(); }
+});
+
+buildServices();
+renderEntities();
+renderItems();
+syncSections();
+renderSummary();
+detectCountry();
+
+/* ============================================================
+   SAMPLE DATA
+   Demo only. Delete this block and the demo banner for the live form.
+   ============================================================ */
+const SAMPLE = {
+  requester: {
+    company: 'Bakehouse Group ME',
+    contact: 'Layla Haddad',
+    email:   'layla.haddad@bakehousegroup.ae',
+    phone:   '+971 50 412 8830',
+    country: 'United Arab Emirates'
+  },
+  scope: 'Existing account',
+  existingAccount: 'Bakehouse Group ME (Dubai)',
+  kinds: ['branch','costcenter','service'],
+  rows: [
+    { name:'Bakehouse Marina Walk', type:'Outlet', parentOutlet:'',
+      address:'Shop 12, Marina Walk, Dubai Marina, Dubai, UAE',
+      cloneFrom:'Bakehouse JLT', billsUnder:'Marina Hospitality LLC',
+      details:'Opens 1 October. Supplied by Al Quoz CK for pastry, direct from suppliers for dry goods. Day close at 2am rather than midnight.' },
+    { name:'Bakehouse Marina Walk - Bar', type:'Cost center', parentOutlet:'Bakehouse Marina Walk',
+      address:'', cloneFrom:'Bakehouse JLT - Bar', billsUnder:'Marina Hospitality LLC',
+      details:'Beverage only. Counted separately from the kitchen.' },
+    { name:'Al Quoz Production Kitchen', type:'Central Kitchen', parentOutlet:'',
+      address:'Warehouse 4, Street 8, Al Quoz Industrial 3, Dubai, UAE',
+      cloneFrom:'none', billsUnder:'', 
+      details:'Produces pastry and bread for all six outlets. Transfers valued at cost plus 5 percent. Live from mid November.' },
+    { name:'Al Quoz Dry Store', type:'Warehouse', parentOutlet:'',
+      address:'Warehouse 5, Street 8, Al Quoz Industrial 3, Dubai, UAE',
+      cloneFrom:'Al Quoz Production Kitchen', billsUnder:'',
+      details:'Holds dry goods and packaging for the CK and issues to outlets weekly.' }
+  ],
+  services: ['accounting','invoiceinbox'],
+  serviceAlloc: {
+    accounting:   [{ entity:'Marina Hospitality LLC', qty:1 }],
+    invoiceinbox: [{ entity:'Marina Hospitality LLC', qty:5 },
+                   { entity:'Our existing account entity', qty:3 }]
+  },
+  entity: 'Different legal entity',
+  entities: [
+    { name:'Marina Hospitality LLC',
+      regNumber:'CN-4482915 / DED-882401', trn:'100482915600003',
+      docs:{ registration:[['marina-trade-license.pdf','application/pdf',240]],
+             vat:[['marina-vat-certificate.pdf','application/pdf',96]],
+             address:[] } }
+  ],
+  notes: 'The Marina Walk site trades under a separate entity from the rest of the group, so it should be invoiced separately. Al Quoz sites stay on the existing entity. Happy to jump on a call if the CK transfer pricing needs discussing.'
+};
+
+// small stand-in files so the upload rows and payload look real
+const mkFile = (name, type, kb) => new File([new Uint8Array(kb * 1024)], name, { type });
+
+function loadSample(){
+  const S = SAMPLE;
+
+  $('company').value = S.requester.company;
+  $('contact').value = S.requester.contact;
+  $('email').value   = S.requester.email;
+  $('phone').value   = S.requester.phone;
+  $('country').value = S.requester.country;
+  $('h1dyn').innerHTML = ' - <span class="dyn">' + esc(S.requester.company) + '</span>';
+
+  const scopeRadio = document.querySelector(`input[name=scope][value="${S.scope}"]`);
+  if (scopeRadio) scopeRadio.checked = true;
+  $('existacct').value = S.existingAccount;
+  $('f_existacct').hidden = S.scope !== 'Existing account';
+
+  S.kinds.forEach(k => {
+    state.kinds.add(k);
+    const t = document.querySelector(`.tog[data-kind="${k}"]`);
+    if (t) t.setAttribute('aria-checked','true');
+  });
+  syncSections();
+
+  state.serviceAlloc = {};
+  Object.entries(S.serviceAlloc).forEach(([k, lines]) => {
+    state.serviceAlloc[k] = lines.map(l => ({ id: ++state.aSeq, entity:l.entity, qty:l.qty }));
+  });
+  S.services.forEach(id => {
+    state.services.add(id);
+    const t = $('svcBody').querySelector(`.tog[data-svc="${id}"]`);
+    if (t) t.setAttribute('aria-checked','true');
+  });
+
+  const entRadio = document.querySelector(`input[name=entity][value="${S.entity}"]`);
+  if (entRadio) entRadio.checked = true;
+  $('docsCard').hidden = S.entity === 'Same legal entity';
+  $('docsNote').textContent = 'Add the entity that will be invoiced, with its paperwork. If several of the rows above bill under different entities, add each one and point the rows at them.';
+
+  state.entities = S.entities.map(e => ({
+    id: ++state.eSeq, name:e.name, regNumber:e.regNumber, trn:e.trn,
+    docs: Object.fromEntries(Object.entries(e.docs).map(([k, arr]) =>
+      [k, arr.map(f => mkFile(f[0], f[1], f[2]))]))
+  }));
+
+  state.items = S.rows.map(r => Object.assign(blankRow(), r));
+  $('notes').value = S.notes;
+
+  renderEntities();
+  syncKsaBlocks();
+  renderItems();
+  renderAllAlloc();
+  renderSummary();
+}
+
+$('clearDemo').addEventListener('click', () => {
+  resetAll();
+  $('demoBanner').hidden = true;
+});
+
+loadSample();
+</script>
+</body>
+</html>

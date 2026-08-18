@@ -1,0 +1,10 @@
+node_modules/
+.wrangler/
+
+# Local Worker secrets. Never commit — set these with `wrangler secret put`.
+.dev.vars
+.env
+.env.*
+
+.DS_Store
+*.log
