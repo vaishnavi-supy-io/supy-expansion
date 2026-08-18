@@ -584,7 +584,7 @@ input[readonly],input:disabled,textarea:disabled{background:var(--readonly);bord
           <h2>Commercial documents</h2>
           <div class="banner info" style="margin-bottom:18px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
-            <span id="docsNote">All optional. Add a billing entity here if anything you are adding trades under its own trade license. Once you add one, each row above can be pointed at the entity it bills under.</span>
+            <span id="docsNote">Add a billing entity here if anything you are adding trades under its own trade license. Each entity needs its name, registration and VAT numbers, and its documents. Once you add one, each row above can be pointed at the entity it bills under.</span>
           </div>
 
           <div id="entityList"></div>
@@ -690,7 +690,11 @@ const CONFIG = {
 
   // Upload limits enforced in the browser before anything is sent.
   maxFileMB: 10,
-  maxFiles: 8,
+  // Per entity, not per request: in Saudi Arabia three documents are required
+  // for each entity, so a global cap of 8 made a three-entity request
+  // impossible to submit at all.
+  maxFilesPerEntity: 6,
+  maxFiles: 30,
   maxTotalMB: 25,
   allowedExt: ['pdf','jpg','jpeg','png','doc','docx','xls','xlsx'],
 
@@ -772,13 +776,31 @@ function syncSections(){
   const needsItems = state.kinds.has('branch') || state.kinds.has('costcenter');
   $('itemsCard').hidden = !needsItems;
   $('svcCard').hidden   = !state.kinds.has('service');
+  // The confirm lives on the toggle (see confirmDiscard), so by the time we get
+  // here the user has already agreed to lose whatever was typed.
   if (!needsItems){ state.items = [blankRow()]; itemError(''); renderItems(); }
   if (!state.kinds.has('service') && state.services.size){
     state.services.clear();
+    state.serviceAlloc = {};
     $('svcBody').querySelectorAll('.tog').forEach(t => t.setAttribute('aria-checked','false'));
-  renderAllAlloc();
+    renderAllAlloc();
     renderSummary();
   }
+}
+
+// Guards the toggles rather than syncSections itself, so a restore or a reset
+// never trips a confirm dialog at the user.
+function confirmDiscard(kind){
+  const willEmptyItems = (kind === 'branch' || kind === 'costcenter')
+    && !( (kind === 'branch' ? state.kinds.has('costcenter') : state.kinds.has('branch')) );
+  if (willEmptyItems && filledRows().length){
+    const n = filledRows().length;
+    return confirm(`Turning this off clears the ${n} row${n === 1 ? '' : 's'} you have filled in. Continue?`);
+  }
+  if (kind === 'service' && state.services.size){
+    return confirm('Turning this off clears the services you selected. Continue?');
+  }
+  return true;
 }
 
 /* ============================================================
@@ -1083,6 +1105,15 @@ async function detectCountry(){
 
 const entityById = id => state.entities.find(e => e.id === id);
 const entityNames = () => state.entities.filter(e => e.name.trim()).map(e => e.name.trim());
+// Rows and feature lines hold an entity id, never a name, so renaming an entity
+// cannot orphan the rows pointing at it. DEFAULT_ID is the account's own entity.
+const DEFAULT_ID = 'default';
+const namedEntities = () => state.entities.filter(e => e.name.trim());
+const entityLabel = ref => {
+  if (ref === DEFAULT_ID) return DEFAULT_ENTITY;
+  const e = state.entities.find(x => String(x.id) === String(ref));
+  return e && e.name.trim() ? e.name.trim() : '';
+};
 const entityFiles = e => DOC_KINDS.flatMap(k => e.docs[k.id]);
 const allFiles = () => state.entities.flatMap(entityFiles);
 
@@ -1154,10 +1185,10 @@ function renderEntities(){
           const t = state.pendingTarget;
           if (t.kind === 'row'){
             const row = state.items.find(r => r.id === t.id);
-            if (row) row.billsUnder = e.name.trim();
+            if (row) row.billsUnder = String(e.id);
           } else if (t.kind === 'alloc'){
             const line = allocLines(t.id).find(l => l.id === t.lineId);
-            if (line) line.entity = e.name.trim();
+            if (line) line.entity = String(e.id);
           }
         }
         refreshBillsOptions();
@@ -1240,9 +1271,9 @@ function removeEntity(id){
   const name = gone ? gone.name.trim() : '';
   state.entities = state.entities.filter(e => e.id !== id);
   if (name){
-    state.items.forEach(r => { if (r.billsUnder === name) r.billsUnder = ''; });
+    state.items.forEach(r => { if (String(r.billsUnder) === String(id)) r.billsUnder = ''; });
     Object.values(state.serviceAlloc).forEach(lines => lines.forEach(l => {
-      if (l.entity === name) l.entity = '';
+      if (String(l.entity) === String(id)) l.entity = '';
     }));
   }
   entError('');
@@ -1261,15 +1292,19 @@ function addFiles(entityId, kind, fileList){
   if (!e || !e.docs[kind]) return;
   const rejected = [];
   let count = allFiles().length;
+  let perEntity = entityFiles(e).length;
   let total = allFiles().reduce((s, f) => s + f.size, 0);
 
   for (const f of fileList){
+    if (perEntity >= CONFIG.maxFilesPerEntity){
+      rejected.push('only ' + CONFIG.maxFilesPerEntity + ' files per billing entity'); break;
+    }
     if (count >= CONFIG.maxFiles){ rejected.push('only ' + CONFIG.maxFiles + ' files in total'); break; }
     if (!CONFIG.allowedExt.includes(extOf(f.name))){ rejected.push(f.name + ' is not a supported file type'); continue; }
     if (f.size > CONFIG.maxFileMB * MB){ rejected.push(f.name + ' is over ' + CONFIG.maxFileMB + ' MB'); continue; }
     if (total + f.size > CONFIG.maxTotalMB * MB){ rejected.push('total upload would pass ' + CONFIG.maxTotalMB + ' MB'); continue; }
     if (e.docs[kind].some(x => x.name === f.name && x.size === f.size)) continue;
-    e.docs[kind].push(f); count++; total += f.size;
+    e.docs[kind].push(f); count++; perEntity++; total += f.size;
   }
 
   entError(rejected.length ? 'Not added: ' + [...new Set(rejected)].join('. ') + '.' : '');
@@ -1311,17 +1346,18 @@ function renderFiles(entityId, kind){
    and everything bills to the account entity. As soon as one exists the choice
    is real, so the field starts blank and has to be answered.                */
 function billsOptionsHTML(current){
-  const names = entityNames();
-  if (!names.length) return `<option value="">${DEFAULT_ENTITY}</option>`;
+  const ents = namedEntities();
+  if (!ents.length) return `<option value="">${DEFAULT_ENTITY}</option>`;
 
+  const sel = v => String(current) === String(v) ? ' selected' : '';
   return [`<option value=""${current ? '' : ' selected'}>Select entity</option>`,
-          `<option${current === DEFAULT_ENTITY ? ' selected' : ''}>${DEFAULT_ENTITY}</option>`]
-    .concat(names.map(n => `<option${current === n ? ' selected' : ''}>${esc(n)}</option>`))
+          `<option value="${DEFAULT_ID}"${sel(DEFAULT_ID)}>${DEFAULT_ENTITY}</option>`]
+    .concat(ents.map(e => `<option value="${e.id}"${sel(e.id)}>${esc(e.name.trim())}</option>`))
     .concat($('docsCard').hidden ? [] : [`<option value="${ADD_ENTITY}">+ Add a billing entity</option>`])
     .join('');
 }
 
-const billsRequired = () => entityNames().length > 0;
+const billsRequired = () => namedEntities().length > 0;
 
 /* ---------- feature allocations ----------
    A feature can be split across entities: five AI Invoice Inbox under one
@@ -1405,11 +1441,11 @@ function refreshBillsOptions(){
   $('svcTable').classList.toggle('with-bills', state.services.size > 0);
   $('svcBillsHead').textContent = names.length ? 'Billing and quantity' : 'Quantity';
 
+  // No clearing here: a row holds an entity id, so renaming an entity just
+  // relabels its option instead of orphaning the row.
   $('itemBody').querySelectorAll('select[data-f="billsUnder"]').forEach(sel => {
     const row = state.items.find(r => r.id === Number(sel.dataset.id));
-    const current = row ? row.billsUnder : '';
-    sel.innerHTML = billsOptionsHTML(current);
-    if (row && current && !names.includes(current)) row.billsUnder = '';
+    sel.innerHTML = billsOptionsHTML(row ? row.billsUnder : '');
   });
 }
 
@@ -1447,7 +1483,7 @@ function renderSummary(){
       const lines = allocLines(s.id);
       const detail = lines
         .filter(l => l.entity || lines.length > 1 || Number(l.qty) > 1)
-        .map(l => `${Number(l.qty) || 0} \u00d7 ${esc(l.entity || DEFAULT_ENTITY)}`)
+        .map(l => `${Number(l.qty) || 0} \u00d7 ${esc(entityLabel(l.entity) || DEFAULT_ENTITY)}`)
         .join('\n');
       rows.push(`<tr class="rowin">
         <td><div class="nm">${esc(s.name)}</div>${detail ? `<div class="sub">${detail}</div>` : ''}</td>
@@ -1761,14 +1797,14 @@ function buildPayload(){
       address: needsAddress(r) ? r.address.trim() : null,
       parentOutlet: needsParent(r) ? r.parentOutlet.trim() : null,
       cloneFrom: r.cloneFrom.trim(),
-      billsUnder: r.billsUnder || DEFAULT_ENTITY,
+      billsUnder: entityLabel(r.billsUnder) || DEFAULT_ENTITY,
       details: r.details.trim() || null
     })),
     features: CONFIG.services.filter(s => state.services.has(s.id)).map(s => ({
       name: s.name,
       totalQuantity: allocTotal(s.id),
       allocations: allocLines(s.id).map(l => ({
-        billsUnder: l.entity || DEFAULT_ENTITY,
+        billsUnder: entityLabel(l.entity) || DEFAULT_ENTITY,
         quantity: Number(l.qty) || 0
       }))
     })),
@@ -1914,6 +1950,7 @@ function resetAll(){
 document.querySelectorAll('.tog[data-kind]').forEach(t => {
   t.addEventListener('click', () => {
     const on = t.getAttribute('aria-checked') === 'true';
+    if (on && !confirmDiscard(t.dataset.kind)) return;   // leave the toggle as it was
     t.setAttribute('aria-checked', String(!on));
     on ? state.kinds.delete(t.dataset.kind) : state.kinds.add(t.dataset.kind);
     clearErr('f_kinds');

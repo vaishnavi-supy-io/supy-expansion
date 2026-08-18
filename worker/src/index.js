@@ -48,7 +48,10 @@ const HUBSPOT_PORTAL_ID = "9423176";
 // Mirrors CONFIG in the form. Enforced again here because client-side limits
 // are a courtesy to the user, not a control.
 const LIMITS = {
-  maxFiles:     8,
+  // Per entity, not per request: in Saudi Arabia three documents are required
+  // for each entity, so a flat cap of 8 made a three-entity request impossible.
+  maxFilesPerEntity: 6,
+  maxFiles:     30,
   maxFileMB:    10,
   maxTotalMB:   25,
   maxJsonBytes: 512 * 1024,
@@ -471,6 +474,13 @@ function validate(p, files) {
   if (files.length > LIMITS.maxFiles) {
     problems.push(`too many documents: ${files.length}, limit is ${LIMITS.maxFiles}`);
   }
+  const perEntity = {};
+  files.forEach(f => { perEntity[f.entityIndex] = (perEntity[f.entityIndex] || 0) + 1; });
+  Object.entries(perEntity).forEach(([i, n]) => {
+    if (n > LIMITS.maxFilesPerEntity) {
+      problems.push(`billing.entities[${i}] has ${n} documents, limit is ${LIMITS.maxFilesPerEntity}`);
+    }
+  });
   let total = 0;
   files.forEach(f => {
     total += f.size || 0;
