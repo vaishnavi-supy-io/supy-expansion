@@ -65,8 +65,9 @@ const DOC_KINDS      = ["registration", "vat", "address"];
 const DOC_LABELS     = { registration: "Registration", vat: "VAT / TRN", address: "Commercial address" };
 const KSA            = "Saudi Arabia";
 
-// Rate limit: submissions per IP per window.
-const RATE_LIMIT  = 5;
+// Rate limit: submissions per IP per window. Overridable per environment via
+// RATE_LIMIT, which also lets a test run raise it without editing source.
+const RATE_LIMIT_DEFAULT = 5;
 const RATE_WINDOW = 10 * 60; // seconds
 
 // ─────────────────────────────────────────────────────────────
@@ -182,6 +183,16 @@ async function handleWebhook(request, env, ctx) {
     return json({ status: "error", message: "Validation failed", problems }, 400, request, env);
   }
 
+  // 4b. Idempotency. A double-click, a flaky connection retried by the browser,
+  //     or an impatient second Submit must not become two CRM notes and two
+  //     Slack messages. The client mints a nonce per attempt; a replay of one
+  //     we have already finished returns the original outcome untouched.
+  const nonce = str(payload.submissionNonce);
+  const replay = await recallSubmission(env, nonce);
+  if (replay) {
+    return json({ ...replay, duplicate: true }, 200, request, env);
+  }
+
   const submissionId = crypto.randomUUID();
   const receivedAt   = new Date().toISOString();
   const account      = payload.requester.account;
@@ -247,7 +258,7 @@ async function handleWebhook(request, env, ctx) {
     await appendLog(env, logLine);
   }
 
-  return json({
+  const response = {
     status: "ok",
     submissionId,
     receivedAt,
@@ -261,7 +272,44 @@ async function handleWebhook(request, env, ctx) {
       documents:   documents.length,
     },
     details: results,
-  }, 200, request, env);
+  };
+
+  await rememberSubmission(env, nonce, response);
+  return json(response, 200, request, env);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Idempotency
+//
+// Keyed on a nonce the client generates once per attempt, so a retry of the
+// same attempt is recognised while a genuinely new request is not. Stored for
+// long enough to cover a retry, not long enough to block someone legitimately
+// submitting twice in a day.
+// ─────────────────────────────────────────────────────────────
+const NONCE_TTL = 60 * 60;   // seconds
+
+const nonceOk = n => typeof n === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(n);
+
+async function recallSubmission(env, nonce) {
+  if (!env.RATELIMIT || !nonceOk(nonce)) return null;
+  try {
+    const seen = await env.RATELIMIT.get(`sub:${nonce}`);
+    return seen ? JSON.parse(seen) : null;
+  } catch (err) {
+    // A KV read failure must not block a real submission; the worst case is a
+    // duplicate, which is recoverable, whereas a rejection loses the request.
+    console.error("idempotency read failed", String(err));
+    return null;
+  }
+}
+
+async function rememberSubmission(env, nonce, response) {
+  if (!env.RATELIMIT || !nonceOk(nonce)) return;
+  try {
+    await env.RATELIMIT.put(`sub:${nonce}`, JSON.stringify(response), { expirationTtl: NONCE_TTL });
+  } catch (err) {
+    console.error("idempotency write failed", String(err));
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1367,10 +1415,11 @@ function handleDebug(request, env) {
 
 async function isRateLimited(env, ip) {
   if (!env.RATELIMIT || ip === "unknown") return false;
+  const limit = Number(env.RATE_LIMIT) > 0 ? Number(env.RATE_LIMIT) : RATE_LIMIT_DEFAULT;
   try {
     const key = `rl:${ip}`;
     const n   = Number(await env.RATELIMIT.get(key)) || 0;
-    if (n >= RATE_LIMIT) return true;
+    if (n >= limit) return true;
     await env.RATELIMIT.put(key, String(n + 1), { expirationTtl: RATE_WINDOW });
     return false;
   } catch (err) {

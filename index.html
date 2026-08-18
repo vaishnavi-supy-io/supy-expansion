@@ -1768,6 +1768,14 @@ function validate(){
 /* ============================================================
    PAYLOAD + SUBMIT
    ============================================================ */
+// Regenerated only once a submission has landed, so every retry of the same
+// attempt carries the same nonce and the Worker can recognise the replay.
+let submissionNonce = newNonce();
+function newNonce(){
+  if (crypto && crypto.randomUUID) return crypto.randomUUID().replace(/-/g, '');
+  return String(Date.now()) + Math.random().toString(36).slice(2, 12);
+}
+
 function buildPayload(){
   const entity = document.querySelector('input[name=entity]:checked');
   const scope  = document.querySelector('input[name=scope]:checked');
@@ -1777,6 +1785,7 @@ function buildPayload(){
   return {
     type: 'expansion_request',
     submittedAt: new Date().toISOString(),
+    submissionNonce,
     accountScope: {
       target:              scope ? scope.value : null,
       existingAccountName: $('existacct').value.trim() || null,
@@ -1893,6 +1902,7 @@ async function submitRequest(){
 
       const res = await fetch(CONFIG.webhookUrl, { method:'POST', headers, body });
       if (!res.ok) throw new Error('Endpoint returned ' + res.status);
+      submissionNonce = newNonce();      // this attempt is done; the next is new
       showDone(payload, false);
     } else {
       showDone(payload, true);   // preview mode
@@ -1925,6 +1935,8 @@ function resetAll(){
   itemError('');
   state.entities = []; state.serviceAlloc = {}; state.aSeq = 0;
   state.pendingTarget = null; state.pendingEntityId = null;
+  submissionNonce = newNonce();
+  draftKey = null; draftNote(''); $('linkBox').hidden = true;
   $('docsCard').hidden = true;
   entError(''); renderEntities();
   document.querySelectorAll('.tog[data-kind]').forEach(t => t.setAttribute('aria-checked','false'));

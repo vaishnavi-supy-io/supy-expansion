@@ -1,0 +1,4 @@
+ADMIN_TOKEN="choose-a-long-random-string"
+RATE_LIMIT="500"
+# SLACK_WEBHOOK_URL="http://localhost:9099/slack"
+# GOOGLE_SCRIPT_URL="http://localhost:9099/sheets"
