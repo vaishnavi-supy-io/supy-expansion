@@ -21,16 +21,26 @@
  *                                                build /download links. Falls back to the
  *                                                request URL's origin.
  *
- * KV bindings (both optional — the Worker degrades rather than failing):
+ *   GMAIL_CLIENT_ID/_SECRET/_REFRESH_TOKEN       Gmail OAuth, for the receipt emails
+ *   GOOGLE_SCRIPT_URL                            Apps Script web app, for the Sheets mirror
+ *   FORM_URL                                     Where the form is hosted, used to build
+ *                                                draft and prefill links.
+ *
+ * KV bindings (the Worker degrades rather than failing when one is missing):
+ *   DRAFTS       saved drafts and account prefill links
  *   LOGS         recent submissions, for GET /logs
- *   RATELIMIT    approximate per-IP throttle
+ *   RATELIMIT    approximate per-IP throttle, and the idempotency record
  *
  * Routes:
- *   POST /webhook            main handler (multipart/form-data or application/json)
+ *   POST /webhook             main handler (multipart/form-data or application/json)
+ *   POST /draft/save          save a draft, returns a resume link
+ *   GET  /draft/load?key=     restore a draft
+ *   POST /account/link        mint a prefill link for one account (x-admin-token)
+ *   GET  /account/prefill?key= that account's outlets, for the picklists
  *   GET  /download?key=&name= document download proxy
- *   GET  /logs               recent submission log
- *   GET  /debug              which secrets are present (requires x-admin-token)
- *   GET  /                   health check
+ *   GET  /logs                recent submission log (x-admin-token)
+ *   GET  /debug               which secrets are present (x-admin-token)
+ *   GET  /                    health check
  */
 
 const HUBSPOT_PORTAL_ID = "9423176";
@@ -98,6 +108,12 @@ export default {
     try {
       if (url.pathname === "/webhook" && request.method === "POST") {
         return await handleWebhook(request, env, ctx);
+      }
+      if (url.pathname === "/account/link" && request.method === "POST") {
+        return await handleAccountLink(request, env);
+      }
+      if (url.pathname === "/account/prefill" && request.method === "GET") {
+        return await handleAccountPrefill(request, env);
       }
       if (url.pathname === "/draft/save" && request.method === "POST") {
         return await handleDraftSave(request, env);
@@ -1089,6 +1105,66 @@ async function handleDraftLoad(request, env) {
   if (!data) return json({ error: "Draft not found or expired" }, 404, request, env);
 
   return json({ data: JSON.parse(data) }, 200, request, env);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Account prefill
+//
+// "Clone setup from" and "Belongs to outlet" are free text because the form
+// cannot know a client's existing outlets. The obvious fix — a public lookup
+// keyed on company name — would let anyone enumerate any client's locations,
+// so prefill is issued deliberately instead: a CSM mints a link scoped to one
+// account and sends it to that client. The key is unguessable and is the only
+// thing that resolves, so there is nothing to enumerate.
+// ─────────────────────────────────────────────────────────────
+const PREFILL_TTL_DAYS = 90;
+const MAX_PREFILL_OUTLETS = 500;
+
+async function handleAccountLink(request, env) {
+  if (!env.ADMIN_TOKEN || request.headers.get("x-admin-token") !== env.ADMIN_TOKEN) {
+    return json({ error: "Unauthorized" }, 401, request, env);
+  }
+  if (!env.DRAFTS) return json({ error: "Prefill storage is not configured" }, 501, request, env);
+
+  const body = await request.json().catch(() => null);
+  if (!body || typeof body !== "object") return json({ error: "Invalid JSON" }, 400, request, env);
+
+  const account = str(body.account);
+  if (!account) return json({ error: "account is required" }, 400, request, env);
+
+  const outlets = (Array.isArray(body.outlets) ? body.outlets : [])
+    .map(str).filter(Boolean).slice(0, MAX_PREFILL_OUTLETS);
+  const seen = new Set();
+  const unique = outlets.filter(o => (seen.has(o.toLowerCase()) ? false : seen.add(o.toLowerCase())));
+
+  const key = newDraftKey();
+  await env.DRAFTS.put(`acct:${key}`, JSON.stringify({
+    account,
+    existingAccountName: str(body.existingAccountName) || account,
+    country:  str(body.country) || null,
+    outlets:  unique,
+    createdAt: new Date().toISOString(),
+  }), { expirationTtl: 60 * 60 * 24 * PREFILL_TTL_DAYS });
+
+  return json({
+    key,
+    account,
+    outlets: unique.length,
+    expiresInDays: PREFILL_TTL_DAYS,
+    url: `${formBaseUrl(env)}?acct=${key}`,
+  }, 200, request, env);
+}
+
+async function handleAccountPrefill(request, env) {
+  if (!env.DRAFTS) return json({ error: "Prefill storage is not configured" }, 501, request, env);
+
+  const key = new URL(request.url).searchParams.get("key");
+  if (!isDraftKey(key)) return json({ error: "Invalid key" }, 400, request, env);
+
+  const data = await env.DRAFTS.get(`acct:${key}`);
+  if (!data) return json({ error: "Link not found or expired" }, 404, request, env);
+
+  return json(JSON.parse(data), 200, request, env);
 }
 
 const newDraftKey = () => crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "").slice(0, 8);

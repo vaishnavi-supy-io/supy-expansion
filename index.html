@@ -522,6 +522,7 @@ input[readonly],input:disabled,textarea:disabled{background:var(--readonly);bord
           </div>
 
           <datalist id="outletList"></datalist>
+          <datalist id="cloneList"></datalist>
 
           <div class="etbl-foot">
             <button class="btn sec" type="button" id="addRowBtn">Add another row</button>
@@ -717,7 +718,7 @@ const CONFIG = {
 /* ============================================================
    STATE
    ============================================================ */
-const state = { kinds:new Set(), items:[], services:new Set(), serviceAlloc:{},
+const state = { kinds:new Set(), items:[], services:new Set(), serviceAlloc:{}, knownOutlets:[],
                 entities:[], seq:0, eSeq:0, aSeq:0,
                 pendingTarget:null, pendingEntityId:null };
 const $  = id => document.getElementById(id);
@@ -823,8 +824,13 @@ function rowHTML(r){
              maxlength="200" placeholder="Street, area, city" aria-label="Address">
     </td>
     <td data-cell="cloneFrom">
-      <input type="text" value="${esc(r.cloneFrom)}" data-id="${r.id}" data-f="cloneFrom"
-             placeholder="Branch name, or none" aria-label="Clone setup from">
+      <div class="combowrap">
+        <input type="text" list="cloneList" value="${esc(r.cloneFrom)}" data-id="${r.id}" data-f="cloneFrom"
+               placeholder="Branch name, or none" aria-label="Clone setup from">
+        <button type="button" class="chevbtn" data-picker aria-label="Show your existing outlets">
+          <svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+      </div>
     </td>
     <td data-cell="billsUnder">
       <div class="selwrap">
@@ -844,13 +850,18 @@ function rowHTML(r){
   </tr>`;
 }
 
-// The picker offers outlets being added in this same request. Existing outlets
-// are not knowable here, so the field stays free text as well as a list.
+// Both pickers offer the outlets already on the account, when a prefill link
+// supplied them, plus the outlets being added in this same request. Neither
+// field is restricted to the list: a client who arrived without a prefill link
+// still has to be able to type a name we do not know about.
 function refreshOutletOptions(){
-  const names = [...new Set(
-    state.items.filter(r => !isCostCenter(r) && r.name.trim()).map(r => r.name.trim())
-  )];
-  $('outletList').innerHTML = names.map(n => `<option value="${esc(n)}"></option>`).join('');
+  const adding = state.items.filter(r => !isCostCenter(r) && r.name.trim()).map(r => r.name.trim());
+  const opts = list => [...new Set(list)].map(n => `<option value="${esc(n)}"></option>`).join('');
+
+  // "Belongs to outlet" points at a real parent, so the ones being added count.
+  $('outletList').innerHTML = opts([...state.knownOutlets, ...adding]);
+  // "Clone setup from" copies an existing setup, so only what already exists.
+  $('cloneList').innerHTML  = opts([...state.knownOutlets, 'none']);
 }
 
 function syncTypeCells(row){
@@ -2005,10 +2016,52 @@ syncSections();
 renderSummary();
 detectCountry();
 
-// A ?draft= link reopens a saved request instead of starting a blank one.
-(function resumeFromLink(){
-  const key = new URLSearchParams(location.search).get('draft');
-  if (key) loadDraft(key);
+/* ---------- arriving from a link ----------
+   ?draft= reopens a request someone already started.
+   ?acct=  is a link a CSM minted for one account: it fills in who they are and
+           loads their existing outlets into the pickers, so "clone setup from"
+           stops being a name typed from memory. Neither field is restricted to
+           the list, because a client without a link must still be able to type. */
+async function loadPrefill(key){
+  if (!DRAFT_BASE) return;
+  try {
+    const res = await fetch(DRAFT_BASE + '/account/prefill?key=' + encodeURIComponent(key));
+    if (!res.ok) return;                       // an expired link just means a blank form
+    const d = await res.json();
+
+    state.knownOutlets = Array.isArray(d.outlets) ? d.outlets : [];
+
+    if (d.account && !$('company').value){
+      $('company').value = d.account;
+      $('h1dyn').innerHTML = ' - <span class="dyn">' + esc(d.account) + '</span>';
+    }
+    if (d.existingAccountName && !$('existacct').value){
+      const r = document.querySelector('input[name=scope][value="Existing account"]');
+      if (r && !document.querySelector('input[name=scope]:checked')){
+        r.checked = true;
+        $('f_existacct').hidden = false;
+      }
+      $('existacct').value = d.existingAccountName;
+    }
+    if (d.country && !$('country').value){
+      $('country').value = d.country;
+      syncKsaBlocks();
+    }
+
+    refreshOutletOptions();
+    if (state.knownOutlets.length){
+      draftNote(state.knownOutlets.length + ' of your existing outlets are available in the "belongs to" and "clone setup from" pickers.', 'ok');
+    }
+  } catch { /* offline or blocked: the form still works, just without the lists */ }
+}
+
+(async function arriveFromLink(){
+  const q = new URLSearchParams(location.search);
+  const acct = q.get('acct');
+  const draft = q.get('draft');
+  // Prefill first: a draft carries the client's own answers and must win.
+  if (acct)  await loadPrefill(acct);
+  if (draft) await loadDraft(draft);
 })();
 </script>
 </body>
