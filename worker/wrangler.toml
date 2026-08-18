@@ -10,18 +10,22 @@ compatibility_date = "2024-09-23"
 [vars]
 ALLOWED_ORIGINS = "https://vaishnavi-supy-io.github.io"
 PUBLIC_BASE_URL = "https://supy-expansion.vaishnavi-5d1.workers.dev"
+FORM_URL        = "https://vaishnavi-supy-io.github.io/supy-expansion/"
 
-# ── KV: recent submission log (optional) ──────────────────────
-#   npx wrangler kv namespace create LOGS
-# [[kv_namespaces]]
-# binding = "LOGS"
-# id      = "REPLACE_ME"
+# ── KV: saved drafts, resumable for 30 days ───────────────────
+[[kv_namespaces]]
+binding = "DRAFTS"
+id      = "32de3d0e21bd4681b3a8d9c07dd6b4d8"
 
-# ── KV: per-IP rate limit (optional) ──────────────────────────
-#   npx wrangler kv namespace create RATELIMIT
-# [[kv_namespaces]]
-# binding = "RATELIMIT"
-# id      = "REPLACE_ME"
+# ── KV: rolling log of the last 200 submissions ───────────────
+[[kv_namespaces]]
+binding = "LOGS"
+id      = "32c6d79319ef4a07a1c0e0645ccd2721"
+
+# ── KV: per-IP rate limit, and the idempotency record ─────────
+[[kv_namespaces]]
+binding = "RATELIMIT"
+id      = "f3c41ed69e184e68b1ae6716825b776f"
 
 # ── Secrets — set via CLI, never written in this file ─────────
 #   npx wrangler secret put CLIENT_ID              # HubSpot OAuth

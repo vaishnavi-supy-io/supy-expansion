@@ -297,6 +297,12 @@ input[readonly],input:disabled,textarea:disabled{background:var(--readonly);bord
 .side-foot .btn.pri{width:100%;padding:12px}
 .side-foot .dest{font-size:11px;color:var(--gray);margin-top:11px;line-height:1.7}
 .side-foot .dest b{color:var(--text);font-weight:600}
+.draftnote{font-size:11px;margin-top:9px;line-height:1.5;color:var(--gray)}
+.draftnote.ok{color:var(--ok-text)}
+.draftnote.bad{color:var(--err-text)}
+.linkbox{display:flex;gap:6px;margin-top:9px}
+.linkbox input{font-size:11px;padding:7px 9px;font-family:'SF Mono','Fira Code',monospace}
+.linkbox .btn{padding:7px 11px;font-size:11px;flex:none}
 .addbar{display:flex;gap:10px;align-items:center;margin-top:4px}
 
 /* ---------- done screen ---------- */
@@ -611,6 +617,12 @@ input[readonly],input:disabled,textarea:disabled{background:var(--readonly);bord
         </div>
         <div class="side-foot">
           <button class="btn pri" type="button" id="submitBtn">Submit request</button>
+          <button class="btn sec" type="button" id="saveBtn" style="width:100%;margin-top:8px">Save and get a link</button>
+          <div class="draftnote" id="draftNote" hidden></div>
+          <div class="linkbox" id="linkBox" hidden>
+            <input type="text" id="draftUrl" readonly aria-label="Link to resume this request">
+            <button class="btn sec" type="button" id="copyLinkBtn">Copy</button>
+          </div>
           <div class="dest">
             Check your list above before submitting. You can add or remove items at any point.
           </div>
@@ -1453,6 +1465,159 @@ function renderSummary(){
 }
 
 /* ============================================================
+   DRAFTS
+   The form autosaves so a closed tab does not cost fifteen rows of typing,
+   and hands back a link that resumes it. Uploaded documents are the one thing
+   a draft cannot carry: file contents never leave the browser until submit,
+   and storing customer paperwork against an unauthenticated key would be a
+   worse trade than asking for two PDFs again.
+   ============================================================ */
+const DRAFT_BASE = CONFIG.webhookUrl ? CONFIG.webhookUrl.replace(/\/webhook$/, '') : null;
+let draftKey  = null;
+let draftTimer = null;
+let draftBusy = false;
+let restoring = false;
+
+function draftNote(msg, kind){
+  const el = $('draftNote');
+  el.textContent = msg || '';
+  el.hidden = !msg;
+  el.className = 'draftnote' + (kind ? ' ' + kind : '');
+}
+
+function serializeState(){
+  return {
+    _draft_key: draftKey,
+    fields: {
+      company:  $('company').value,  country: $('country').value,
+      phone:    $('phone').value,    contact: $('contact').value,
+      email:    $('email').value,    notes:   $('notes').value,
+      existacct:$('existacct').value, newacct: $('newacct').value,
+      scope:  (document.querySelector('input[name=scope]:checked')  || {}).value || '',
+      entity: (document.querySelector('input[name=entity]:checked') || {}).value || ''
+    },
+    kinds:    [...state.kinds],
+    items:    state.items,
+    services: [...state.services],
+    serviceAlloc: state.serviceAlloc,
+    // File objects cannot be serialised; only the entity's typed details survive.
+    entities: state.entities.map(e => ({ id:e.id, name:e.name, regNumber:e.regNumber, trn:e.trn })),
+    seq: state.seq, eSeq: state.eSeq, aSeq: state.aSeq
+  };
+}
+
+function restoreState(d){
+  if (!d || !d.fields) return;
+  restoring = true;
+  const f = d.fields;
+
+  ['company','country','phone','contact','email','notes','existacct','newacct'].forEach(id => {
+    if (typeof f[id] === 'string') $(id).value = f[id];
+  });
+  $('h1dyn').innerHTML = f.company ? ' - <span class="dyn">' + esc(f.company) + '</span>' : '';
+
+  const scopeRadio = f.scope && document.querySelector(`input[name=scope][value="${CSS.escape(f.scope)}"]`);
+  if (scopeRadio){
+    scopeRadio.checked = true;
+    $('f_existacct').hidden = f.scope !== 'Existing account';
+    $('f_newacct').hidden   = f.scope !== 'New account';
+  }
+
+  state.kinds = new Set(Array.isArray(d.kinds) ? d.kinds : []);
+  document.querySelectorAll('.tog[data-kind]').forEach(t =>
+    t.setAttribute('aria-checked', String(state.kinds.has(t.dataset.kind))));
+
+  state.seq  = Number(d.seq)  || 0;
+  state.eSeq = Number(d.eSeq) || 0;
+  state.aSeq = Number(d.aSeq) || 0;
+
+  // Built explicitly rather than via blankRow(), which would bump state.seq
+  // once per restored row and hand the next new row a colliding id.
+  state.items = (Array.isArray(d.items) ? d.items : []).map(r => ({
+    id: Number(r.id) || ++state.seq,
+    name: r.name || '', type: r.type || '', parentOutlet: r.parentOutlet || '',
+    address: r.address || '', cloneFrom: r.cloneFrom || '',
+    billsUnder: r.billsUnder || '', details: r.details || ''
+  }));
+
+  state.entities = (Array.isArray(d.entities) ? d.entities : []).map(e => ({
+    id: e.id, name: e.name || '', regNumber: e.regNumber || '', trn: e.trn || '',
+    docs: { registration:[], vat:[], address:[] }
+  }));
+
+  state.serviceAlloc = d.serviceAlloc && typeof d.serviceAlloc === 'object' ? d.serviceAlloc : {};
+  state.services = new Set(Array.isArray(d.services) ? d.services : []);
+  $('svcBody').querySelectorAll('.tog').forEach(t =>
+    t.setAttribute('aria-checked', String(state.services.has(t.dataset.svc))));
+
+  const entRadio = f.entity && document.querySelector(`input[name=entity][value="${CSS.escape(f.entity)}"]`);
+  if (entRadio){
+    entRadio.checked = true;
+    $('docsCard').hidden = f.entity === 'Same legal entity';
+  }
+
+  syncSections();
+  renderEntities();
+  syncKsaBlocks();
+  renderItems();
+  renderAllAlloc();
+  renderSummary();
+  restoring = false;
+
+  const hadDocs = state.entities.length > 0;
+  draftNote(hadDocs
+    ? 'Draft restored. Any documents you attached before need adding again.'
+    : 'Draft restored.', 'ok');
+}
+
+async function saveDraft(silent){
+  if (!DRAFT_BASE || draftBusy) return;
+  draftBusy = true;
+  if (!silent) draftNote('Saving...');
+  try {
+    const res = await fetch(DRAFT_BASE + '/draft/save', {
+      method:'POST', headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify(serializeState())
+    });
+    if (!res.ok) throw new Error('Save failed (' + res.status + ')');
+    const out = await res.json();
+    draftKey = out.key;
+    if (!silent){
+      $('draftUrl').value = out.draft_url;
+      $('linkBox').hidden = false;
+      draftNote('Saved. This link reopens your request for ' + out.expiresInDays + ' days.', 'ok');
+    } else {
+      draftNote('Draft saved automatically.', 'ok');
+    }
+  } catch (err){
+    // Autosave failing is not worth alarming someone mid-form; an explicit
+    // save is, because they are waiting on a link.
+    if (silent) draftNote('');
+    else draftNote(err.message + '. Your answers are still on screen.', 'bad');
+  } finally { draftBusy = false; }
+}
+
+function queueAutosave(){
+  if (!DRAFT_BASE || restoring) return;
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => saveDraft(true), 2000);
+}
+
+async function loadDraft(key){
+  if (!DRAFT_BASE) return;
+  draftNote('Loading your saved request...');
+  try {
+    const res = await fetch(DRAFT_BASE + '/draft/load?key=' + encodeURIComponent(key));
+    if (!res.ok) throw new Error(res.status === 404 ? 'That link has expired or does not exist.' : 'Could not load (' + res.status + ')');
+    const out = await res.json();
+    draftKey = key;
+    restoreState(out.data);
+  } catch (err){
+    draftNote(err.message + ' Start a new request below.', 'bad');
+  }
+}
+
+/* ============================================================
    VALIDATION
    ============================================================ */
 const setErr   = id => $(id).classList.add('bad');
@@ -1814,12 +1979,37 @@ $('itemBody').addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.tagName === 'INPUT'){ e.preventDefault(); addRow(); }
 });
 
+$('saveBtn').addEventListener('click', () => saveDraft(false));
+$('copyLinkBtn').addEventListener('click', async () => {
+  const btn = $('copyLinkBtn');
+  try {
+    await navigator.clipboard.writeText($('draftUrl').value);
+    btn.textContent = 'Copied';
+    setTimeout(() => btn.textContent = 'Copy', 1600);
+  } catch {
+    $('draftUrl').select();   // clipboard blocked: let them copy by hand
+    btn.textContent = 'Select';
+  }
+});
+
+// Autosave covers typing anywhere on the page plus the toggles and pickers,
+// which do not emit input events of their own.
+document.addEventListener('input',  queueAutosave);
+document.addEventListener('change', queueAutosave);
+document.addEventListener('click', e => { if (e.target.closest('.tog, .xbtn, .btn.sec')) queueAutosave(); });
+
 buildServices();
 renderEntities();
 renderItems();
 syncSections();
 renderSummary();
 detectCountry();
+
+// A ?draft= link reopens a saved request instead of starting a blank one.
+(function resumeFromLink(){
+  const key = new URLSearchParams(location.search).get('draft');
+  if (key) loadDraft(key);
+})();
 </script>
 </body>
 </html>

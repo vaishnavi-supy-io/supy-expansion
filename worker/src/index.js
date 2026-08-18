@@ -99,6 +99,12 @@ export default {
       if (url.pathname === "/webhook" && request.method === "POST") {
         return await handleWebhook(request, env, ctx);
       }
+      if (url.pathname === "/draft/save" && request.method === "POST") {
+        return await handleDraftSave(request, env);
+      }
+      if (url.pathname === "/draft/load" && request.method === "GET") {
+        return await handleDraftLoad(request, env);
+      }
       if (url.pathname === "/download" && request.method === "GET") {
         return await handleDownload(request, env);
       }
@@ -886,6 +892,73 @@ function buildSubject(p) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Drafts
+//
+// A fifteen-row request is a lot of typing to lose to a closed tab, so the form
+// autosaves and hands back a link that resumes it. The key is the only thing
+// guarding a draft, and a draft holds contact details, addresses and TRNs — so
+// keys are long and random, and the link should be treated as sensitive.
+//
+// Uploaded documents are deliberately NOT part of a draft: File contents never
+// leave the browser until submit, and re-attaching two PDFs is cheaper than
+// storing customer paperwork against an unauthenticated key.
+// ─────────────────────────────────────────────────────────────
+const DRAFT_TTL_DAYS  = 30;
+const MAX_DRAFT_BYTES = 256 * 1024;
+
+async function handleDraftSave(request, env) {
+  if (!env.DRAFTS) return json({ error: "Drafts are not configured" }, 501, request, env);
+
+  const raw = await request.text();
+  if (raw.length > MAX_DRAFT_BYTES) {
+    return json({ error: "Draft too large" }, 413, request, env);
+  }
+
+  let body;
+  try { body = JSON.parse(raw); } catch { return json({ error: "Invalid JSON" }, 400, request, env); }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return json({ error: "Draft must be a JSON object" }, 400, request, env);
+  }
+
+  // Reuse the caller's key when resuming, so one draft does not sprout a new
+  // URL on every keystroke. Anything that is not a key we issued is ignored.
+  const key = isDraftKey(body._draft_key) ? body._draft_key : newDraftKey();
+  const savedAt = new Date().toISOString();
+
+  await env.DRAFTS.put(
+    `draft:${key}`,
+    JSON.stringify({ ...body, _draft_key: key, _saved_at: savedAt }),
+    { expirationTtl: 60 * 60 * 24 * DRAFT_TTL_DAYS }
+  );
+
+  return json({
+    key,
+    savedAt,
+    expiresInDays: DRAFT_TTL_DAYS,
+    draft_url: `${formBaseUrl(env)}?draft=${key}`,
+  }, 200, request, env);
+}
+
+async function handleDraftLoad(request, env) {
+  if (!env.DRAFTS) return json({ error: "Drafts are not configured" }, 501, request, env);
+
+  const key = new URL(request.url).searchParams.get("key");
+  if (!isDraftKey(key)) return json({ error: "Invalid draft key" }, 400, request, env);
+
+  const data = await env.DRAFTS.get(`draft:${key}`);
+  if (!data) return json({ error: "Draft not found or expired" }, 404, request, env);
+
+  return json({ data: JSON.parse(data) }, 200, request, env);
+}
+
+const newDraftKey = () => crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "").slice(0, 8);
+const isDraftKey  = k => typeof k === "string" && /^[a-f0-9]{40}$/.test(k);
+
+function formBaseUrl(env) {
+  return (env.FORM_URL || "https://vaishnavi-supy-io.github.io/supy-expansion/").replace(/\?.*$/, "");
+}
+
+// ─────────────────────────────────────────────────────────────
 // Download proxy  (GET /download?key=&name=)
 // ─────────────────────────────────────────────────────────────
 function sanitizeFilename(name) {
@@ -986,6 +1059,7 @@ function handleDebug(request, env) {
     PUBLIC_BASE_URL:       env.PUBLIC_BASE_URL || "(request origin)",
     LOGS_bound:            Boolean(env.LOGS),
     RATELIMIT_bound:       Boolean(env.RATELIMIT),
+    DRAFTS_bound:          Boolean(env.DRAFTS),
   }, 200, request, env);
 }
 
