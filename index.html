@@ -295,14 +295,14 @@ input[readonly],input:disabled,textarea:disabled{background:var(--readonly);bord
 .xbtn svg{width:13px;height:13px;stroke:currentColor;stroke-width:2.4;fill:none}
 .side-foot{padding:16px 18px;border-top:1px solid var(--divider);background:#fbfbfd}
 .side-foot .btn.pri{width:100%;padding:12px}
-.side-foot .dest{font-size:11px;color:var(--gray);margin-top:11px;line-height:1.7}
-.side-foot .dest b{color:var(--text);font-weight:600}
 .draftnote{font-size:11px;margin-top:9px;line-height:1.5;color:var(--gray)}
 .draftnote.ok{color:var(--ok-text)}
 .draftnote.bad{color:var(--err-text)}
 .linkbox{display:flex;gap:6px;margin-top:9px}
 .linkbox input{font-size:11px;padding:7px 9px;font-family:'SF Mono','Fira Code',monospace}
 .linkbox .btn{padding:7px 11px;font-size:11px;flex:none}
+.side-foot .dest{font-size:11px;color:var(--gray);margin-top:11px;line-height:1.7}
+.side-foot .dest b{color:var(--text);font-weight:600}
 .addbar{display:flex;gap:10px;align-items:center;margin-top:4px}
 
 /* ---------- done screen ---------- */
@@ -318,6 +318,35 @@ input[readonly],input:disabled,textarea:disabled{background:var(--readonly);bord
 }
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* ---------- explainer ---------- */
+.explain{border:1px solid var(--divider);border-radius:var(--radius);background:#fbfbfd;padding:18px 20px}
+.ex-row{display:flex;gap:14px;padding:7px 0;font-size:12px;line-height:1.55}
+.ex-row .ex-k{flex:none;width:210px;font-weight:600;color:var(--text)}
+.ex-row .ex-v{color:var(--gray)}
+.ex-row .ex-v b{color:var(--text);font-weight:600}
+.ex-eg{margin-top:16px;border-top:1px solid var(--divider);padding-top:16px}
+.ex-eg-h{font-size:10px;font-weight:600;letter-spacing:.9px;text-transform:uppercase;color:var(--action);margin-bottom:12px}
+.ex-egs{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:1100px){.ex-egs{grid-template-columns:1fr}}
+.ex-case{background:#fff;border:1px solid var(--divider);border-radius:var(--radius);padding:16px 18px}
+.ex-case-t{font-size:12px;font-weight:700;margin-bottom:12px}
+.ex-pane-l{font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--gray);margin-bottom:6px}
+.ex-case ul{margin:0;padding-left:16px;font-size:12px;color:var(--gray);line-height:1.8}
+.ex-case ul b{color:var(--action);font-weight:700}
+.ex-case ul .q{color:var(--text);font-weight:600}
+.ex-down{display:flex;align-items:center;gap:8px;margin:12px 0;color:var(--action)}
+.ex-down svg{width:15px;height:15px;flex:none}
+.ex-down span{height:1px;background:var(--divider);flex:1}
+.ex-eg-n{font-size:11px;color:var(--gray);margin-top:12px;padding-top:10px;border-top:1px solid var(--divider);line-height:1.55}
+.ex-eg-n b{color:var(--text);font-weight:600}
+@media (max-width:700px){.ex-row{flex-direction:column;gap:2px}.ex-row .ex-k{width:auto}}
+
+/* both catalogue tables share the alloc column */
+#prodTable th.bills,#prodTable td.bills{display:none}
+#prodTable.with-bills th.bills,#prodTable.with-bills td.bills{display:table-cell}
+#prodTable td.bills{width:300px}
+
 </style>
 </head>
 <body>
@@ -363,7 +392,7 @@ input[readonly],input:disabled,textarea:disabled{background:var(--readonly);bord
     <div class="cols">
       <!-- ---------- LEFT ---------- -->
       <div>
-        <!-- requester -->
+        <!-- your details -->
         <div class="card">
           <h2>Your details</h2>
           <div class="row3">
@@ -398,7 +427,7 @@ input[readonly],input:disabled,textarea:disabled{background:var(--readonly);bord
               <div class="err-msg">Enter a valid email address</div>
             </div>
           </div>
-          <div class="field" id="f_scope" style="margin-bottom:0">
+          <div class="field" id="f_scope">
             <label class="lbl">Where should this expansion sit? <span class="req">*</span></label>
             <div class="radios">
               <label class="radio"><input type="radio" name="scope" value="Existing account"><span class="dot"><i></i></span>Under our existing account</label>
@@ -407,13 +436,13 @@ input[readonly],input:disabled,textarea:disabled{background:var(--readonly);bord
             </div>
             <div class="err-msg">Select where the expansion should sit</div>
           </div>
-          <div class="field" id="f_existacct" hidden style="margin:16px 0 0">
+          <div class="field" id="f_existacct" hidden>
             <label class="lbl" for="existacct">Your existing retailer / account name <span class="req">*</span></label>
             <input type="text" id="existacct" placeholder="Enter your account name in Supy">
             <div class="hint">Exactly as it appears in Supy, so we attach this request to the right account.</div>
             <div class="err-msg">Tell us which existing account this belongs to</div>
           </div>
-          <div class="field" id="f_newacct" hidden style="margin:16px 0 0">
+          <div class="field" id="f_newacct" hidden>
             <label class="lbl" for="newacct">Name for the new account <span class="req">*</span></label>
             <input type="text" id="newacct" placeholder="Enter the new account name">
             <div class="hint">A separate account keeps data, users and reporting apart from your existing one.</div>
@@ -421,137 +450,100 @@ input[readonly],input:disabled,textarea:disabled{background:var(--readonly);bord
           </div>
         </div>
 
-        <!-- what -->
+        <!-- products -->
         <div class="card" style="padding-bottom:8px">
           <h2>What are you adding?</h2>
-          <div class="field" id="f_kinds" style="margin:0 -26px">
-            <table class="tbl">
-              <thead><tr><th>Item</th><th style="text-align:right">Add</th></tr></thead>
-              <tbody>
-                <tr>
-                  <td>
-                    <div class="nm">Outlets</div>
-                    <div class="sub">Restaurants, central kitchens, warehouses</div>
-                  </td>
-                  <td style="text-align:right">
-                    <button class="tog" type="button" role="switch" aria-checked="false"
-                            data-kind="branch" aria-label="Add outlets"><i></i></button>
-                  </td>
-                </tr>
-                <tr>
-                  <td>
-                    <div class="nm">Cost centers</div>
-                    <div class="sub">Stock holding units inside an outlet</div>
-                  </td>
-                  <td style="text-align:right">
-                    <button class="tog" type="button" role="switch" aria-checked="false"
-                            data-kind="costcenter" aria-label="Add cost centers"><i></i></button>
-                  </td>
-                </tr>
-                <tr>
-                  <td>
-                    <div class="nm">Services / Features</div>
-                    <div class="sub">Add on modules for your account</div>
-                  </td>
-                  <td style="text-align:right">
-                    <button class="tog" type="button" role="switch" aria-checked="false"
-                            data-kind="service" aria-label="Add services or features"><i></i></button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <div class="err-msg" style="padding:12px 26px 0">Pick at least one thing to add</div>
-          </div>
-        </div>
 
-        <!-- items -->
-        <div class="card" id="itemsCard" hidden style="padding-bottom:18px">
-          <h2>Outlet and cost center details</h2>
-          <div class="hint" style="margin:-8px 0 14px">Add a row for each one you are adding. Outlets and cost centers can be mixed in the same request.</div>
-
-          <details class="disc">
-            <summary>
-              <svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>
-              Not sure which type to pick?
-            </summary>
-            <div class="dbody">
-              <dl class="tdefs">
-                <div class="tdef">
-                  <dt>Restaurant / Outlet</dt>
-                  <dd>Sells to guests and consumes stock. Has its own POS, stock counts and supplier orders.</dd>
-                </div>
-                <div class="tdef">
-                  <dt>Central Kitchen</dt>
-                  <dd>Produces food and sends it to other locations. Runs recipes and batch production, and issues internal transfers rather than selling to guests.</dd>
-                </div>
-                <div class="tdef">
-                  <dt>Warehouse / Store</dt>
-                  <dd>Receives and distributes stock without producing or selling it. Takes supplier deliveries, then issues to branches.</dd>
-                </div>
-                <div class="tdef">
-                  <dt>Cost center</dt>
-                  <dd>Not a location of its own. A sub unit inside an existing branch, such as a bar, banquet or staff meals, used to split cost and consumption within that branch.</dd>
-                </div>
-                <div class="tdef">
-                  <dt>Not sure</dt>
-                  <dd>Pick this and describe the setup in Details. We will advise on the right structure.</dd>
-                </div>
-              </dl>
-              <div class="tkey">
-                The quickest test: if it <b>holds its own stock and gets counted separately</b>, it is a branch, and which of the three depends on whether it sells, produces or stores. If it <b>shares another branch's stock</b> and you only need to see its costs apart, it is a cost center.
-              </div>
+          <div class="explain">
+            <div class="ex-row">
+              <span class="ex-k">Outlet (Back of House License)</span>
+              <span class="ex-v">A physical location with its own address. Every one includes <b>one cost center</b>.</span>
             </div>
-          </details>
+            <div class="ex-row">
+              <span class="ex-k">CK add on</span>
+              <span class="ex-v">An add on to an Outlet (Back of House) license that turns it into a <b>central kitchen</b>.</span>
+            </div>
+            <div class="ex-row">
+              <span class="ex-k">WH add on</span>
+              <span class="ex-v">An add on to an Outlet (Back of House) license that turns it into a <b>warehouse</b>.</span>
+            </div>
+            <div class="ex-row">
+              <span class="ex-k">Additional cost center</span>
+              <span class="ex-v">For a location running more than one kitchen, CK or warehouse. Add one for each cost center beyond the first.</span>
+            </div>
 
-          <div class="etbl-wrap">
-            <table class="etbl">
-              <thead>
-                <tr>
-                  <th style="width:15%">Name <span class="req">*</span></th>
-                  <th style="width:15%">Type <span class="req">*</span></th>
-                  <th style="width:15%">Belongs to outlet</th>
-                  <th style="width:17%">Address</th>
-                  <th style="width:15%">Clone setup from <span class="req">*</span></th>
-                  <th class="bills" style="width:15%">Bills under</th>
-                  <th>Details</th>
-                  <th class="rmcell"></th>
-                </tr>
-              </thead>
-              <tbody id="itemBody"></tbody>
+            <div class="ex-eg">
+            <div class="ex-eg-h">Worked examples</div>
+            <div class="ex-egs">
+
+              <div class="ex-case">
+                <div class="ex-case-t">One location, three cost centers</div>
+                <div class="ex-pane-l">What you are opening</div>
+                <ul>
+                  <li>Restaurant Branch 1
+                    <ul><li>Kitchen</li><li>Bakery</li><li>Coffee Bar</li></ul>
+                  </li>
+                </ul>
+                <div class="ex-down">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg>
+                  <span></span>
+                </div>
+                <div class="ex-pane-l">What to order</div>
+                <ul>
+                  <li><b>1</b> <span class="q">Outlet (Back of House License)</span></li>
+                  <li><b>2</b> <span class="q">Additional cost centers</span></li>
+                </ul>
+                <div class="ex-eg-n">The Kitchen is the cost center included with the license, so only the <b>Bakery</b> and <b>Coffee Bar</b> are extra.</div>
+              </div>
+
+              <div class="ex-case">
+                <div class="ex-case-t">Three locations, one of them a central kitchen</div>
+                <div class="ex-pane-l">What you are opening</div>
+                <ul>
+                  <li>Restaurant Branch 1
+                    <ul><li>Kitchen</li><li>Bar</li></ul>
+                  </li>
+                  <li>Restaurant Branch 2
+                    <ul><li>Kitchen</li><li>Bar</li></ul>
+                  </li>
+                  <li>Central Kitchen
+                    <ul><li>CK cost center</li></ul>
+                  </li>
+                </ul>
+                <div class="ex-down">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg>
+                  <span></span>
+                </div>
+                <div class="ex-pane-l">What to order</div>
+                <ul>
+                  <li><b>3</b> <span class="q">Outlet (Back of House License)</span></li>
+                  <li><b>1</b> <span class="q">CK add on</span></li>
+                  <li><b>2</b> <span class="q">Additional cost centers</span></li>
+                </ul>
+                <div class="ex-eg-n">Every location needs its own license, so that is <b>three</b>. The <b>CK add on</b> converts one of them into a central kitchen, and the CK cost center is the one included with that license. The two extras are the <b>bars</b> in branches 1 and 2.</div>
+              </div>
+
+            </div>
+          </div>
+          </div>
+
+          <div class="field" id="f_products" style="margin:18px -28px 0">
+            <table class="tbl" id="prodTable">
+              <thead><tr>
+                <th>Product</th>
+                <th class="bills" id="prodBillsHead">Quantity</th>
+                <th style="text-align:right">Add</th>
+              </tr></thead>
+              <tbody id="prodBody"></tbody>
             </table>
+            <div class="err-msg" style="padding:12px 28px 0">Add at least one product or feature</div>
           </div>
-
-          <datalist id="outletList"></datalist>
-          <datalist id="cloneList"></datalist>
-
-          <div class="etbl-foot">
-            <button class="btn sec" type="button" id="addRowBtn">Add another row</button>
-            <span class="hint" style="margin:0">Add as many branches or cost centers as you need.</span>
-          </div>
-
-          <ul class="hints">
-            <li><b>Name.</b> The name your team will recognise in Supy.</li>
-            <li>
-              <b>Type.</b> An outlet is a site of your own. A cost center sits inside one:
-              <dl>
-                <div><dt>Outlet</dt><span>a restaurant or store that serves guests and consumes stock.</span></div>
-                <div><dt>Central Kitchen</dt><span>an outlet that produces and transfers stock to your other sites, running recipes and batch production.</span></div>
-                <div><dt>Warehouse</dt><span>an outlet that holds and issues stock to other sites, with no production of its own.</span></div>
-                <div><dt>Cost center</dt><span>a stock holding unit inside an existing outlet, such as a bar, pastry section or banquet kitchen. It counts and costs separately but shares the outlet address.</span></div>
-              </dl>
-            </li>
-            <li><b>Belongs to outlet.</b> Cost centers only. Pick one of the outlets you are adding above, or type an existing outlet name as it appears in your account. Outlets leave this blank.</li>
-            <li><b>Address.</b> Street, area, city and country, up to 200 characters. This appears on purchase orders and delivery notes, so outlets need it and cost centers do not.</li>
-            <li><b>Clone setup from.</b> Copying an existing one is faster than building from scratch, so name the closest match on menu and suppliers. Type it as it appears in your account. Write "none" to set up fresh.</li>
-            <li><b>Details.</b> Which locations it supplies or is supplied by, target go live date, the day close time if it differs from your other sites, and anything that should differ from the setup you are copying.</li>
-          </ul>
-          <div class="err-msg" id="itemErr" style="margin-top:12px"></div>
         </div>
 
-        <!-- services -->
-        <div class="card" id="svcCard" hidden style="padding-bottom:8px">
+        <!-- features -->
+        <div class="card" style="padding-bottom:8px">
           <h2>Services / Features</h2>
-          <div class="field" id="f_svc" style="margin:0 -26px">
+          <div class="field" id="f_svc" style="margin:0 -28px">
             <table class="tbl" id="svcTable">
               <thead><tr>
                 <th>Service / Feature</th>
@@ -560,15 +552,14 @@ input[readonly],input:disabled,textarea:disabled{background:var(--readonly);bord
               </tr></thead>
               <tbody id="svcBody"></tbody>
             </table>
-            <div class="err-msg" style="padding:12px 26px 0">Select at least one service or feature</div>
-            <div class="hint" style="padding:12px 26px 0">Quantity is how many locations the feature applies to. If different locations bill under different entities, split the line and set a quantity for each.</div>
+            <div class="hint" style="padding:12px 28px 0">Quantity is how many locations the feature applies to. If different locations bill under different entities, split the line and set a quantity for each.</div>
           </div>
         </div>
 
         <!-- billing -->
         <div class="card">
           <h2>Billing entity</h2>
-          <div class="field" id="f_entity">
+          <div class="field" id="f_entity" style="margin:0">
             <label class="lbl">Will this be billed under the same trade license and legal entity as your existing locations? <span class="req">*</span></label>
             <div class="radios">
               <label class="radio"><input type="radio" name="entity" value="Same legal entity"><span class="dot"><i></i></span>Yes, same legal entity</label>
@@ -584,12 +575,10 @@ input[readonly],input:disabled,textarea:disabled{background:var(--readonly);bord
           <h2>Commercial documents</h2>
           <div class="banner info" style="margin-bottom:18px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
-            <span id="docsNote">Add a billing entity here if anything you are adding trades under its own trade license. Each entity needs its name, registration and VAT numbers, and its documents. Once you add one, each row above can be pointed at the entity it bills under.</span>
+            <span id="docsNote">Add the entity that will be invoiced, with its paperwork. If different products bill under different entities, add each one and point the lines at them.</span>
           </div>
-
           <div id="entityList"></div>
           <div class="err-msg" id="entErr" style="margin-bottom:12px"></div>
-
           <button class="btn sec" type="button" id="addEntBtn">Add a billing entity</button>
         </div>
 
@@ -611,10 +600,10 @@ input[readonly],input:disabled,textarea:disabled{background:var(--readonly);bord
         </div>
         <div style="margin-top:16px">
           <table class="tbl">
-            <thead><tr><th>Item</th><th>Type</th><th class="act"></th></tr></thead>
+            <thead><tr><th>Item</th><th>Qty</th><th class="act"></th></tr></thead>
             <tbody id="sumBody"></tbody>
           </table>
-          <div class="empty" id="sumEmpty">Nothing added yet. Pick what you are adding, then build your list on the left.</div>
+          <div class="empty" id="sumEmpty">Nothing added yet. Turn on the products and features you need.</div>
         </div>
         <div class="side-foot">
           <button class="btn pri" type="button" id="submitBtn">Submit request</button>
@@ -624,9 +613,7 @@ input[readonly],input:disabled,textarea:disabled{background:var(--readonly);bord
             <input type="text" id="draftUrl" readonly aria-label="Link to resume this request">
             <button class="btn sec" type="button" id="copyLinkBtn">Copy</button>
           </div>
-          <div class="dest">
-            Check your list above before submitting. You can add or remove items at any point.
-          </div>
+          <div class="dest">Check your list above before submitting. You can add or remove items at any point.</div>
         </div>
       </div>
     </div>
@@ -652,353 +639,78 @@ input[readonly],input:disabled,textarea:disabled{background:var(--readonly);bord
 
 </div>
 
+
 <script>
 /* ============================================================
-   CONFIG - set these for your environment
+   CONFIG
    ============================================================ */
 const CONFIG = {
   // Single endpoint that receives the request and fans it out downstream.
-  // Set to null to run in preview mode: the form validates and shows the exact
+  // Leave null to run in preview mode: the form validates and shows the exact
   // JSON payload instead of posting it anywhere.
   webhookUrl: 'https://supy-expansion.vaishnavi-5d1.workers.dev/webhook',
-
-  // Optional shared secret sent as the X-Supy-Signature header. It ships to the
-  // browser, so it deters casual bots and nothing more. Leave null unless the
-  // Worker has FORM_SHARED_SECRET set, and reach for Turnstile if the endpoint
-  // starts attracting real traffic.
+  // Ships to the browser, so it deters bots and nothing more. Leave null unless
+  // the Worker has FORM_SHARED_SECRET set.
   webhookSecret: null,
 
-  // How uploaded documents are delivered.
-  //   'multipart' - the request becomes multipart/form-data: a "payload" field
-  //                 holding the JSON, plus one "documents" field per file.
-  //                 This is the right choice for real files.
-  //   'base64'    - files are embedded in the JSON as base64. Only for small
-  //                 files, and many webhook endpoints cap the body around 1 MB.
+  // 'multipart' turns the request into multipart/form-data (a "payload" field
+  // with the JSON, plus the files). 'base64' embeds files in the JSON instead,
+  // which most webhook endpoints cap around 1 MB.
   uploadMode: 'multipart',
 
   // Country prefill, in order of preference:
-  //   1. detectedCountry - set server side from a geo header, the most reliable
-  //      and the only one with no runtime cost. Cloudflare gives CF-IPCountry,
-  //      Vercel x-vercel-ip-country, CloudFront CloudFront-Viewer-Country.
-  //      Render the page with: CONFIG.detectedCountry = "United Arab Emirates";
+  //   1. detectedCountry - set server side from a geo header (CF-IPCountry,
+  //      x-vercel-ip-country, CloudFront-Viewer-Country). No runtime cost.
   //   2. geoEndpoint - a JSON geo-IP lookup, e.g. 'https://ipapi.co/json/'.
-  //      Costs a request, is rate limited, and ad blockers often block it.
-  //   3. Timezone, used automatically when neither of the above is set. No
-  //      network call and no IP involved, so nothing to disclose or consent to.
+  //   3. Timezone, used automatically when neither is set. No network call.
   detectedCountry: null,
   geoEndpoint: null,
 
-  // Upload limits enforced in the browser before anything is sent.
   maxFileMB: 10,
-  // Per entity, not per request: in Saudi Arabia three documents are required
-  // for each entity, so a global cap of 8 made a three-entity request
-  // impossible to submit at all.
+  // Per entity, not per request: Saudi Arabia requires three documents for each
+  // entity, so a flat cap of 8 made a three-entity request impossible to submit.
   maxFilesPerEntity: 6,
   maxFiles: 30,
   maxTotalMB: 25,
   allowedExt: ['pdf','jpg','jpeg','png','doc','docx','xls','xlsx'],
 
+  products: [
+    { id:'outlet', name:'Outlet (Back of House License)',
+      desc:'A physical location with its own address. Includes one cost center.' },
+    { id:'ck_addon', name:'CK add on',
+      desc:'Turns an Outlet (Back of House) license into a central kitchen.' },
+    { id:'wh_addon', name:'WH add on',
+      desc:'Turns an Outlet (Back of House) license into a warehouse.' },
+    { id:'cost_center', name:'Additional cost center',
+      desc:'An extra cost center in a location that already has one.' }
+  ],
+
   services: [
-    { id:'accounting',  name:'Accounting Integration', desc:'Sync purchases and invoices to your accounting system' },
-    { id:'deltashare',  name:'Delta Share',            desc:'Share your Supy data into your own warehouse' },
-    { id:'invoiceinbox',name:'AI Invoice Inbox',       desc:'Invoices captured and matched automatically' },
-    { id:'forecasting', name:'Sales Forecasting',      desc:'Forecast demand to drive par levels and ordering' }
+    { id:'accounting',   name:'Accounting Integration',
+      desc:'Sync purchases and invoices to your accounting system' },
+    { id:'invoiceinbox', name:'AI Invoice Inbox',
+      desc:'Invoices captured and matched automatically' }
   ]
 };
 
-// Local development only: ?api=http://localhost:8787/webhook points the form at
-// `wrangler dev`. Restricted to localhost so a shared link can never redirect a
-// customer's submission, documents and all, to somebody else's server.
-(function devEndpointOverride(){
-  try {
-    const api = new URLSearchParams(location.search).get('api');
-    if (!api) return;
-    const u = new URL(api, location.href);
-    const local = ['localhost','127.0.0.1','[::1]'].includes(u.hostname);
-    if (local) CONFIG.webhookUrl = u.href;
-  } catch { /* malformed override: keep the configured endpoint */ }
-})();
+const CATALOGUE = () => CONFIG.products.concat(CONFIG.services);
+const catItem = id => CATALOGUE().find(x => x.id === id);
 
 /* ============================================================
    STATE
    ============================================================ */
-const state = { kinds:new Set(), items:[], services:new Set(), serviceAlloc:{}, knownOutlets:[],
-                entities:[], seq:0, eSeq:0, aSeq:0,
-                pendingTarget:null, pendingEntityId:null };
+const state = {
+  selected: new Set(),      // catalogue ids that are switched on
+  alloc: {},                // id -> [{ id, entity, qty }]
+  entities: [], eSeq:0, aSeq:0,
+  pendingTarget:null, pendingEntityId:null
+};
+
 const $  = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 /* ============================================================
-   BUILD DYNAMIC BITS
-   ============================================================ */
-function buildServices(){
-  $('svcBody').innerHTML = CONFIG.services.map(s => `
-    <tr>
-      <td>
-        <div class="nm">${esc(s.name)}</div>
-        <div class="sub">${esc(s.desc)}</div>
-      </td>
-      <td class="bills">
-        <div class="allocbox" data-alloc="${s.id}"></div>
-      </td>
-      <td style="text-align:right">
-        <button class="tog" type="button" role="switch" aria-checked="false"
-                data-svc="${s.id}" aria-label="Add ${esc(s.name)}"><i></i></button>
-      </td>
-    </tr>`).join('');
-
-
-
-  $('svcBody').querySelectorAll('.tog').forEach(t => {
-    t.addEventListener('click', () => {
-      const id = t.dataset.svc;
-      const on = t.getAttribute('aria-checked') === 'true';
-      t.setAttribute('aria-checked', String(!on));
-      if (on){
-        state.services.delete(id);
-        delete state.serviceAlloc[id];
-      } else {
-        state.services.add(id);
-        if (!state.serviceAlloc[id]) state.serviceAlloc[id] = [blankAlloc()];
-      }
-      clearErr('f_svc');
-      renderAlloc(id);
-      refreshBillsOptions();
-      renderSummary();
-    });
-  });
-}
-
-/* ============================================================
-   SECTION VISIBILITY
-   ============================================================ */
-function syncSections(){
-  const needsItems = state.kinds.has('branch') || state.kinds.has('costcenter');
-  $('itemsCard').hidden = !needsItems;
-  $('svcCard').hidden   = !state.kinds.has('service');
-  // The confirm lives on the toggle (see confirmDiscard), so by the time we get
-  // here the user has already agreed to lose whatever was typed.
-  if (!needsItems){ state.items = [blankRow()]; itemError(''); renderItems(); }
-  if (!state.kinds.has('service') && state.services.size){
-    state.services.clear();
-    state.serviceAlloc = {};
-    $('svcBody').querySelectorAll('.tog').forEach(t => t.setAttribute('aria-checked','false'));
-    renderAllAlloc();
-    renderSummary();
-  }
-}
-
-// Guards the toggles rather than syncSections itself, so a restore or a reset
-// never trips a confirm dialog at the user.
-function confirmDiscard(kind){
-  const willEmptyItems = (kind === 'branch' || kind === 'costcenter')
-    && !( (kind === 'branch' ? state.kinds.has('costcenter') : state.kinds.has('branch')) );
-  if (willEmptyItems && filledRows().length){
-    const n = filledRows().length;
-    return confirm(`Turning this off clears the ${n} row${n === 1 ? '' : 's'} you have filled in. Continue?`);
-  }
-  if (kind === 'service' && state.services.size){
-    return confirm('Turning this off clears the services you selected. Continue?');
-  }
-  return true;
-}
-
-/* ============================================================
-   ITEMS  (inline editable table)
-   ============================================================ */
-const TYPES = ['Outlet','Central Kitchen','Warehouse','Cost center','Not sure'];
-
-function blankRow(){ return { id: ++state.seq, name:'', type:'', parentOutlet:'', address:'', cloneFrom:'', billsUnder:'', details:'' }; }
-
-// A cost center sits inside an existing outlet: it shares that address, but it
-// does need to say which outlet it belongs to. Outlets are the reverse.
-const SITE_TYPES = ['Outlet','Central Kitchen','Warehouse'];
-const isCostCenter = r => r.type === 'Cost center';
-const needsAddress = r => SITE_TYPES.includes(r.type);
-const needsParent  = r => isCostCenter(r);
-
-function rowHTML(r){
-  const opts = ['<option value="">Select type</option>']
-    .concat(TYPES.map(t => `<option${r.type === t ? ' selected' : ''}>${t}</option>`)).join('');
-  return `<tr data-row="${r.id}">
-    <td data-cell="name">
-      <input type="text" value="${esc(r.name)}" data-id="${r.id}" data-f="name"
-             placeholder="Enter name" aria-label="Name">
-    </td>
-    <td data-cell="type">
-      <div class="selwrap">
-        <select data-id="${r.id}" data-f="type" aria-label="Type">${opts}</select>
-        <span class="chev"><svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></span>
-      </div>
-    </td>
-    <td data-cell="parentOutlet">
-      <div class="combowrap">
-        <input type="text" list="outletList" value="${esc(r.parentOutlet)}"
-               data-id="${r.id}" data-f="parentOutlet"
-               placeholder="Pick or type" aria-label="Belongs to outlet">
-        <button type="button" class="chevbtn" data-picker aria-label="Show outlets in this request">
-          <svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
-        </button>
-      </div>
-    </td>
-    <td data-cell="address">
-      <input type="text" value="${esc(r.address)}" data-id="${r.id}" data-f="address"
-             maxlength="200" placeholder="Street, area, city" aria-label="Address">
-    </td>
-    <td data-cell="cloneFrom">
-      <div class="combowrap">
-        <input type="text" list="cloneList" value="${esc(r.cloneFrom)}" data-id="${r.id}" data-f="cloneFrom"
-               placeholder="Branch name, or none" aria-label="Clone setup from">
-        <button type="button" class="chevbtn" data-picker aria-label="Show your existing outlets">
-          <svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
-        </button>
-      </div>
-    </td>
-    <td data-cell="billsUnder">
-      <div class="selwrap">
-        <select data-id="${r.id}" data-f="billsUnder" aria-label="Bills under"></select>
-        <span class="chev"><svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></span>
-      </div>
-    </td>
-    <td data-cell="details">
-      <textarea data-id="${r.id}" data-f="details"
-                placeholder="Supply route, target go live date" aria-label="Details">${esc(r.details)}</textarea>
-    </td>
-    <td class="rmcell">
-      <button class="xbtn" type="button" data-rm="${r.id}" aria-label="Remove row">
-        <svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-      </button>
-    </td>
-  </tr>`;
-}
-
-// Both pickers offer the outlets already on the account, when a prefill link
-// supplied them, plus the outlets being added in this same request. Neither
-// field is restricted to the list: a client who arrived without a prefill link
-// still has to be able to type a name we do not know about.
-function refreshOutletOptions(){
-  const adding = state.items.filter(r => !isCostCenter(r) && r.name.trim()).map(r => r.name.trim());
-  const opts = list => [...new Set(list)].map(n => `<option value="${esc(n)}"></option>`).join('');
-
-  // "Belongs to outlet" points at a real parent, so the ones being added count.
-  $('outletList').innerHTML = opts([...state.knownOutlets, ...adding]);
-  // "Clone setup from" copies an existing setup, so only what already exists.
-  $('cloneList').innerHTML  = opts([...state.knownOutlets, 'none']);
-}
-
-function syncTypeCells(row){
-  const tr = $('itemBody').querySelector(`[data-row="${row.id}"]`);
-  if (!tr) return;
-
-  const set = (field, active, placeholder) => {
-    const cell  = tr.querySelector(`[data-cell="${field}"]`);
-    const input = cell.querySelector('input');
-    input.disabled = !active;
-    input.placeholder = active ? placeholder : 'Not needed';
-    if (!active){ row[field] = ''; input.value = ''; cell.classList.remove('bad-cell'); }
-  };
-
-  // an outlet has an address of its own; a cost center has a parent instead
-  set('address',      !isCostCenter(row) && row.type !== '', 'Street, area, city');
-  set('parentOutlet', isCostCenter(row),                     'Outlet name');
-}
-
-function renderItems(){
-  if (!state.items.length) state.items.push(blankRow());
-  $('itemBody').innerHTML = state.items.map(rowHTML).join('');
-
-  $('itemBody').querySelectorAll('[data-f]').forEach(el => {
-    const ev = el.tagName === 'SELECT' ? 'change' : 'input';
-    el.addEventListener(ev, () => {
-      const row = state.items.find(r => r.id === Number(el.dataset.id));
-      if (!row) return;
-
-      if (el.dataset.f === 'billsUnder' && el.value === ADD_ENTITY){
-        el.value = row.billsUnder;      // the sentinel is an action, not a value
-        addEntityFor({ kind:'row', id: row.id });
-        return;
-      }
-
-      row[el.dataset.f] = el.value;
-      if (el.dataset.f === 'type') syncTypeCells(row);
-      if (el.dataset.f === 'name' || el.dataset.f === 'type') refreshOutletOptions();
-      el.closest('td').classList.remove('bad-cell');
-      itemError('');
-      renderSummary();
-    });
-  });
-
-  $('itemBody').querySelectorAll('[data-rm]').forEach(b => {
-    b.addEventListener('click', () => removeRow(Number(b.dataset.rm)));
-  });
-
-  $('itemBody').querySelectorAll('[data-picker]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const input = btn.previousElementSibling;
-      input.focus();
-      try { input.showPicker(); } catch { /* older browsers: typing still filters */ }
-    });
-  });
-
-  state.items.forEach(syncTypeCells);
-  refreshOutletOptions();
-  refreshBillsOptions();
-  renderSummary();
-}
-
-function addRow(){
-  state.items.push(blankRow());
-  renderItems();
-  const rows = $('itemBody').querySelectorAll('tr');
-  const last = rows[rows.length - 1];
-  if (last){
-    last.classList.add('rowin');
-    last.querySelector('input').focus();
-  }
-}
-
-function removeRow(id){
-  state.items = state.items.filter(r => r.id !== id);
-  if (!state.items.length) state.items.push(blankRow());
-  itemError('');
-  renderItems();
-}
-
-// a row counts only once someone has actually typed in it
-const rowUsed  = r => Boolean(r.name.trim() || r.type || r.parentOutlet.trim()
-                              || r.address.trim() || r.cloneFrom.trim() || r.details.trim());
-const rowReady = r => Boolean(r.name.trim() && r.type && r.cloneFrom.trim()
-                              && (!needsAddress(r) || r.address.trim())
-                              && (!needsParent(r)  || r.parentOutlet.trim()));
-const filledRows = () => state.items.filter(rowUsed);
-
-function itemError(msg){
-  $('itemErr').textContent = msg;
-  $('itemErr').style.display = msg ? 'block' : 'none';
-}
-
-function markRowGaps(){
-  let bad = 0;
-  filledRows().forEach(r => {
-    const tr = $('itemBody').querySelector(`[data-row="${r.id}"]`);
-    if (!tr) return;
-    const checks = [['name', r.name.trim()], ['type', r.type], ['cloneFrom', r.cloneFrom.trim()]];
-    if (needsAddress(r)) checks.push(['address', r.address.trim()]);
-    if (needsParent(r))  checks.push(['parentOutlet', r.parentOutlet.trim()]);
-    if (billsRequired()) checks.push(['billsUnder', r.billsUnder]);
-    checks.forEach(([f, v]) => {
-      const cell = tr.querySelector(`[data-cell="${f}"]`);
-      if (cell) cell.classList.toggle('bad-cell', !v);
-      if (!v) bad++;
-    });
-  });
-  return bad;
-}
-
-/* ============================================================
    BILLING ENTITIES + DOCUMENTS
-   Entities are defined once here and referenced per row above, so a client
-   opening four sites under two licenses uploads each license once.
    ============================================================ */
 const MB = 1024 * 1024;
 const fmtSize = b => b < MB ? Math.max(1, Math.round(b / 1024)) + ' KB'
@@ -1007,10 +719,9 @@ const extOf = n => (n.split('.').pop() || '').toLowerCase();
 const DEFAULT_ENTITY = 'Our existing account entity';
 const ADD_ENTITY = '__add_entity__';
 
-// The third category is only asked for in Saudi Arabia, where a commercial
-// address document is part of the standard registration pack.
 const KSA = 'Saudi Arabia';
 const inKSA = () => $('country').value === KSA;
+
 const DOC_KINDS = [
   { id:'registration', label:'Business / commercial registration',
     hint:'CR, trade license or local equivalent' },
@@ -1042,8 +753,6 @@ const COUNTRIES = ['United Arab Emirates','Saudi Arabia','Qatar','Kuwait','Bahra
 'United Kingdom','United States','Uruguay','Uzbekistan','Vanuatu','Vatican City','Venezuela','Vietnam','Yemen',
 'Zambia','Zimbabwe'];
 
-// Enough coverage for the markets Supy operates in, plus the majors. An
-// unmapped zone simply leaves the field blank rather than guessing wrong.
 const TZ_COUNTRY = {
   'Asia/Dubai':'United Arab Emirates','Asia/Riyadh':'Saudi Arabia','Asia/Qatar':'Qatar',
   'Asia/Kuwait':'Kuwait','Asia/Bahrain':'Bahrain','Asia/Muscat':'Oman','Asia/Aden':'Yemen',
@@ -1073,47 +782,30 @@ const TZ_COUNTRY = {
   'America/Sao_Paulo':'Brazil','America/Argentina/Buenos_Aires':'Argentina'
 };
 
-// A prefill, never a lock: the customer can always change it, and a wrong
-// guess is visible rather than silent because the field says where it came from.
+// A prefill, never a lock: the customer can always change it.
 async function detectCountry(){
   const sel = $('country');
   if (sel.value) return;
-
   let guess = CONFIG.detectedCountry || null;
 
   if (!guess && CONFIG.geoEndpoint){
     try {
       const res = await fetch(CONFIG.geoEndpoint, { cache:'no-store' });
-      if (res.ok){
-        const j = await res.json();
-        guess = j.country_name || j.country || null;
-      }
-    } catch { /* offline, blocked or rate limited: fall through to timezone */ }
+      if (res.ok){ const j = await res.json(); guess = j.country_name || j.country || null; }
+    } catch { /* blocked or offline: fall through to timezone */ }
   }
-
   if (!guess){
     try { guess = TZ_COUNTRY[Intl.DateTimeFormat().resolvedOptions().timeZone] || null; }
     catch { guess = null; }
   }
-
   if (!guess || sel.value) return;
   if (![...sel.options].some(o => o.value === guess)) return;
-
   sel.value = guess;
   syncKsaBlocks();
 }
 
 const entityById = id => state.entities.find(e => e.id === id);
 const entityNames = () => state.entities.filter(e => e.name.trim()).map(e => e.name.trim());
-// Rows and feature lines hold an entity id, never a name, so renaming an entity
-// cannot orphan the rows pointing at it. DEFAULT_ID is the account's own entity.
-const DEFAULT_ID = 'default';
-const namedEntities = () => state.entities.filter(e => e.name.trim());
-const entityLabel = ref => {
-  if (ref === DEFAULT_ID) return DEFAULT_ENTITY;
-  const e = state.entities.find(x => String(x.id) === String(ref));
-  return e && e.name.trim() ? e.name.trim() : '';
-};
 const entityFiles = e => DOC_KINDS.flatMap(k => e.docs[k.id]);
 const allFiles = () => state.entities.flatMap(entityFiles);
 
@@ -1123,9 +815,8 @@ function blankEntity(){
 }
 
 function dropHTML(e, kind){
-  const optional = ' <span class="req">*</span>';   // every visible pack is required
   return `<div class="docblock" data-dockind="${kind.id}" data-ent="${e.id}"${kind.ksaOnly && !inKSA() ? ' hidden' : ''}>
-    <label class="lbl">${esc(kind.label)}${optional}</label>
+    <label class="lbl">${esc(kind.label)} <span class="req">*</span></label>
     <label class="drop" for="docs-${e.id}-${kind.id}">
       <input type="file" id="docs-${e.id}-${kind.id}" data-eid="${e.id}" data-kind="${kind.id}" multiple
              accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx">
@@ -1171,8 +862,7 @@ function renderEntities(){
   $('entityList').innerHTML = state.entities.map(entityHTML).join('');
 
   $('entityList').querySelectorAll('[data-ef]').forEach(el => {
-    const ev = el.tagName === 'SELECT' ? 'change' : 'input';
-    el.addEventListener(ev, () => {
+    el.addEventListener('input', () => {
       const e = entityById(Number(el.dataset.eid));
       if (!e) return;
       e[el.dataset.ef] = el.value;
@@ -1183,17 +873,11 @@ function renderEntities(){
       if (el.dataset.ef === 'name'){
         if (state.pendingEntityId === e.id && state.pendingTarget){
           const t = state.pendingTarget;
-          if (t.kind === 'row'){
-            const row = state.items.find(r => r.id === t.id);
-            if (row) row.billsUnder = String(e.id);
-          } else if (t.kind === 'alloc'){
-            const line = allocLines(t.id).find(l => l.id === t.lineId);
-            if (line) line.entity = String(e.id);
-          }
+          const line = allocLines(t.id).find(l => l.id === t.lineId);
+          if (line) line.entity = String(e.id);
         }
         refreshBillsOptions();
         renderAllAlloc();
-        renderItems();
         renderSummary();
       }
     });
@@ -1248,7 +932,7 @@ function syncKsaBlocks(){
 function addEntityFor(target){
   const e = blankEntity();
   state.entities.push(e);
-  state.pendingTarget = target;      // { kind:'row'|'alloc', id, lineId? }
+  state.pendingTarget = target;
   state.pendingEntityId = e.id;
   renderEntities();
   const block = $('entityList').querySelector(`[data-ent="${e.id}"]`);
@@ -1267,18 +951,12 @@ function addEntity(){
 }
 
 function removeEntity(id){
-  const gone = entityById(id);
-  const name = gone ? gone.name.trim() : '';
   state.entities = state.entities.filter(e => e.id !== id);
-  if (name){
-    state.items.forEach(r => { if (String(r.billsUnder) === String(id)) r.billsUnder = ''; });
-    Object.values(state.serviceAlloc).forEach(lines => lines.forEach(l => {
-      if (String(l.entity) === String(id)) l.entity = '';
-    }));
-  }
+  Object.values(state.alloc).forEach(lines => lines.forEach(l => {
+    if (String(l.entity) === String(id)) l.entity = '';
+  }));
   entError('');
   renderEntities();
-  renderItems();
 }
 
 function entError(msg){
@@ -1341,14 +1019,25 @@ function renderFiles(entityId, kind){
   });
 }
 
-/* ---------- billing entity options, shared by both tables ----------
-   With no entities defined there is nothing to choose, so the column is hidden
-   and everything bills to the account entity. As soon as one exists the choice
-   is real, so the field starts blank and has to be answered.                */
+/* ============================================================
+   BILLING OPTIONS
+   With no entities defined there is nothing to choose, so everything bills to
+   the account entity. As soon as one exists the choice is real, so each line
+   starts blank and has to be answered.
+   ============================================================ */
+// Lines hold an entity id, never a name, so correcting a typo in an entity name
+// relabels its option instead of orphaning every line pointing at it.
+const DEFAULT_ID = 'default';
+const namedEntities = () => state.entities.filter(e => e.name.trim());
+const entityLabel = ref => {
+  if (ref === DEFAULT_ID) return DEFAULT_ENTITY;
+  const e = state.entities.find(x => String(x.id) === String(ref));
+  return e && e.name.trim() ? e.name.trim() : '';
+};
+
 function billsOptionsHTML(current){
   const ents = namedEntities();
   if (!ents.length) return `<option value="">${DEFAULT_ENTITY}</option>`;
-
   const sel = v => String(current) === String(v) ? ' selected' : '';
   return [`<option value=""${current ? '' : ' selected'}>Select entity</option>`,
           `<option value="${DEFAULT_ID}"${sel(DEFAULT_ID)}>${DEFAULT_ENTITY}</option>`]
@@ -1359,43 +1048,86 @@ function billsOptionsHTML(current){
 
 const billsRequired = () => namedEntities().length > 0;
 
-/* ---------- feature allocations ----------
-   A feature can be split across entities: five AI Invoice Inbox under one
-   entity and three under another. Each line is an entity plus a quantity.   */
+function refreshBillsOptions(){
+  const on = billsRequired();
+  $('prodTable').classList.toggle('with-bills', state.selected.size > 0);
+  $('svcTable').classList.toggle('with-bills', state.selected.size > 0);
+  $('prodBillsHead').textContent = on ? 'Billing and quantity' : 'Quantity';
+  $('svcBillsHead').textContent  = on ? 'Billing and quantity' : 'Quantity';
+}
+
+/* ============================================================
+   CATALOGUE ROWS + ALLOCATIONS
+   A line can be split across entities: five under one, three under another.
+   ============================================================ */
 function blankAlloc(){ return { id: ++state.aSeq, entity:'', qty:1 }; }
 
-const allocLines = id => state.serviceAlloc[id] || [];
+const allocLines = id => state.alloc[id] || [];
 const allocTotal = id => allocLines(id).reduce((s, l) => s + (Number(l.qty) || 0), 0);
 
-function renderAlloc(svcId){
-  const box = $('svcBody').querySelector(`[data-alloc="${svcId}"]`);
-  if (!box) return;
-  if (!state.services.has(svcId)){ box.innerHTML = ''; return; }
+function buildCatalogue(list, tbodyId){
+  $(tbodyId).innerHTML = list.map(s => `
+    <tr>
+      <td>
+        <div class="nm">${esc(s.name)}</div>
+        <div class="sub">${esc(s.desc)}</div>
+      </td>
+      <td class="bills"><div class="allocbox" data-alloc="${s.id}"></div></td>
+      <td style="text-align:right">
+        <button class="tog" type="button" role="switch" aria-checked="false"
+                data-item="${s.id}" aria-label="Add ${esc(s.name)}"><i></i></button>
+      </td>
+    </tr>`).join('');
 
-  const lines = allocLines(svcId);
+  $(tbodyId).querySelectorAll('.tog[data-item]').forEach(t => {
+    t.addEventListener('click', () => {
+      const id = t.dataset.item;
+      const on = t.getAttribute('aria-checked') === 'true';
+      t.setAttribute('aria-checked', String(!on));
+      if (on){
+        state.selected.delete(id);
+        delete state.alloc[id];
+      } else {
+        state.selected.add(id);
+        if (!state.alloc[id]) state.alloc[id] = [blankAlloc()];
+      }
+      clearErr('f_products');
+      renderAlloc(id);
+      refreshBillsOptions();
+      renderSummary();
+    });
+  });
+}
+
+function renderAlloc(itemId){
+  const box = document.querySelector(`[data-alloc="${itemId}"]`);
+  if (!box) return;
+  if (!state.selected.has(itemId)){ box.innerHTML = ''; return; }
+
+  const lines = allocLines(itemId);
   const split = billsRequired();
 
   box.innerHTML = lines.map(l => `
     <div class="allocrow" data-line="${l.id}">
       ${split ? `<div class="selwrap">
-        <select data-alloc-ent="${svcId}" data-line="${l.id}" aria-label="Bills under">${billsOptionsHTML(l.entity)}</select>
+        <select data-alloc-ent="${itemId}" data-line="${l.id}" aria-label="Bills under">${billsOptionsHTML(l.entity)}</select>
         <span class="chev"><svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></span>
       </div>` : ''}
       <input type="number" min="1" step="1" value="${esc(l.qty)}"
-             data-alloc-qty="${svcId}" data-line="${l.id}" aria-label="Quantity">
-      ${lines.length > 1 ? `<button class="xbtn" type="button" data-alloc-rm="${svcId}" data-line="${l.id}" aria-label="Remove split">
+             data-alloc-qty="${itemId}" data-line="${l.id}" aria-label="Quantity">
+      ${lines.length > 1 ? `<button class="xbtn" type="button" data-alloc-rm="${itemId}" data-line="${l.id}" aria-label="Remove split">
         <svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>` : ''}
     </div>`).join('')
-    + (split ? `<button class="btn ghost" type="button" data-alloc-add="${svcId}">+ Split across entities</button>` : '')
-    + (lines.length > 1 ? `<div class="allocnote">Total: ${allocTotal(svcId)}</div>` : '');
+    + (split ? `<button class="btn ghost" type="button" data-alloc-add="${itemId}">+ Split across entities</button>` : '')
+    + (lines.length > 1 ? `<div class="allocnote">Total: ${allocTotal(itemId)}</div>` : '');
 
   box.querySelectorAll('[data-alloc-ent]').forEach(sel => {
     sel.addEventListener('change', () => {
-      const line = allocLines(svcId).find(l => l.id === Number(sel.dataset.line));
+      const line = allocLines(itemId).find(l => l.id === Number(sel.dataset.line));
       if (!line) return;
       if (sel.value === ADD_ENTITY){
         sel.value = line.entity;
-        addEntityFor({ kind:'alloc', id: svcId, lineId: line.id });
+        addEntityFor({ id: itemId, lineId: line.id });
         return;
       }
       line.entity = sel.value;
@@ -1406,91 +1138,59 @@ function renderAlloc(svcId){
 
   box.querySelectorAll('[data-alloc-qty]').forEach(inp => {
     inp.addEventListener('input', () => {
-      const line = allocLines(svcId).find(l => l.id === Number(inp.dataset.line));
+      const line = allocLines(itemId).find(l => l.id === Number(inp.dataset.line));
       if (!line) return;
       line.qty = inp.value;
       inp.closest('td').classList.remove('bad-cell');
       const note = box.querySelector('.allocnote');
-      if (note) note.textContent = 'Total: ' + allocTotal(svcId);
+      if (note) note.textContent = 'Total: ' + allocTotal(itemId);
       renderSummary();
     });
   });
 
   box.querySelectorAll('[data-alloc-add]').forEach(b => {
     b.addEventListener('click', () => {
-      state.serviceAlloc[svcId].push(blankAlloc());
-      renderAlloc(svcId);
+      state.alloc[itemId].push(blankAlloc());
+      renderAlloc(itemId);
       renderSummary();
     });
   });
 
   box.querySelectorAll('[data-alloc-rm]').forEach(b => {
     b.addEventListener('click', () => {
-      state.serviceAlloc[svcId] = allocLines(svcId).filter(l => l.id !== Number(b.dataset.line));
-      renderAlloc(svcId);
+      state.alloc[itemId] = allocLines(itemId).filter(l => l.id !== Number(b.dataset.line));
+      renderAlloc(itemId);
       renderSummary();
     });
   });
 }
 
-function renderAllAlloc(){ CONFIG.services.forEach(s => renderAlloc(s.id)); }
-
-function refreshBillsOptions(){
-  const names = entityNames();
-  document.querySelector('.etbl').classList.toggle('with-bills', names.length > 0);
-  $('svcTable').classList.toggle('with-bills', state.services.size > 0);
-  $('svcBillsHead').textContent = names.length ? 'Billing and quantity' : 'Quantity';
-
-  // No clearing here: a row holds an entity id, so renaming an entity just
-  // relabels its option instead of orphaning the row.
-  $('itemBody').querySelectorAll('select[data-f="billsUnder"]').forEach(sel => {
-    const row = state.items.find(r => r.id === Number(sel.dataset.id));
-    sel.innerHTML = billsOptionsHTML(row ? row.billsUnder : '');
-  });
-}
-
-const readAsBase64 = file => new Promise((res, rej) => {
-  const r = new FileReader();
-  r.onload  = () => res(String(r.result).split(',')[1]);
-  r.onerror = () => rej(new Error('Could not read ' + file.name));
-  r.readAsDataURL(file);
-});
+function renderAllAlloc(){ CATALOGUE().forEach(s => renderAlloc(s.id)); }
 
 /* ============================================================
    SUMMARY PANEL
    ============================================================ */
 function renderSummary(){
   const rows = [];
-
-  const named = state.items.filter(i => i.name.trim());
-  const groups = [
-    { label:'Outlets',      list: named.filter(i => i.type !== 'Cost center') },
-    { label:'Cost centers', list: named.filter(i => i.type === 'Cost center') }
-  ];
-  groups.filter(g => g.list.length).forEach(g => {
-    rows.push(`<tr class="grp"><td colspan="3">${g.label}</td></tr>`);
-    g.list.forEach(i => {
-      rows.push(`<tr class="rowin">
-        <td><div class="nm">${esc(i.name)}</div></td>
-        <td><span class="badge">${esc(i.type || 'No type')}</span></td>
-        <td class="act"></td></tr>`);
-    });
-  });
-
-  if (state.services.size){
-    rows.push(`<tr class="grp"><td colspan="3">Services / Features</td></tr>`);
-    CONFIG.services.filter(s => state.services.has(s.id)).forEach(s => {
+  const group = (label, list) => {
+    const chosen = list.filter(s => state.selected.has(s.id));
+    if (!chosen.length) return;
+    rows.push(`<tr class="grp"><td colspan="3">${label}</td></tr>`);
+    chosen.forEach(s => {
       const lines = allocLines(s.id);
       const detail = lines
-        .filter(l => l.entity || lines.length > 1 || Number(l.qty) > 1)
+        .filter(l => l.entity || lines.length > 1)
         .map(l => `${Number(l.qty) || 0} \u00d7 ${esc(entityLabel(l.entity) || DEFAULT_ENTITY)}`)
         .join('\n');
       rows.push(`<tr class="rowin">
         <td><div class="nm">${esc(s.name)}</div>${detail ? `<div class="sub">${detail}</div>` : ''}</td>
-        <td><span class="badge">Feature</span></td>
+        <td><span class="badge">${allocTotal(s.id)}</span></td>
         <td class="act"></td></tr>`);
     });
-  }
+  };
+
+  group('Products', CONFIG.products);
+  group('Services / Features', CONFIG.services);
 
   if (allFiles().length){
     rows.push(`<tr class="grp"><td colspan="3">Documents</td></tr>`);
@@ -1498,32 +1198,27 @@ function renderSummary(){
       rows.push(`<tr class="rowin">
         <td><div class="nm">${esc(f.name)}</div>
             <div class="sub">${fmtSize(f.size)}${e.name.trim() ? ' \u00b7 ' + esc(e.name.trim()) : ''}</div></td>
-        <td><span class="badge">${esc(k.id === 'vat' ? 'VAT' : k.id === 'registration' ? 'Registration' : 'Address')}</span></td>
+        <td><span class="badge">${esc(k.id === 'vat' ? 'VAT' : k.id === 'registration' ? 'Reg' : 'Addr')}</span></td>
         <td class="act"></td></tr>`);
     })));
   }
 
   $('sumBody').innerHTML = rows.join('');
-  const total = named.length + state.services.size + allFiles().length;
-  $('sumEmpty').hidden = total > 0;
-  $('sideCount').textContent = 'Total items: ' + total;
-
-
+  const totalUnits = [...state.selected].reduce((s, id) => s + allocTotal(id), 0);
+  $('sumEmpty').hidden = state.selected.size > 0 || allFiles().length > 0;
+  $('sideCount').textContent = 'Total units: ' + totalUnits;
 }
 
 /* ============================================================
    DRAFTS
-   The form autosaves so a closed tab does not cost fifteen rows of typing,
-   and hands back a link that resumes it. Uploaded documents are the one thing
-   a draft cannot carry: file contents never leave the browser until submit,
-   and storing customer paperwork against an unauthenticated key would be a
-   worse trade than asking for two PDFs again.
+   Autosaves so a closed tab does not cost the whole request, and hands back a
+   link that reopens it. Uploaded documents are the one thing a draft cannot
+   carry: file contents never leave the browser until submit, and storing
+   customer paperwork against a key that is itself the only credential is a
+   worse trade than asking for the files again.
    ============================================================ */
 const DRAFT_BASE = CONFIG.webhookUrl ? CONFIG.webhookUrl.replace(/\/webhook$/, '') : null;
-let draftKey  = null;
-let draftTimer = null;
-let draftBusy = false;
-let restoring = false;
+let draftKey = null, draftTimer = null, draftBusy = false, restoring = false;
 
 function draftNote(msg, kind){
   const el = $('draftNote');
@@ -1536,20 +1231,17 @@ function serializeState(){
   return {
     _draft_key: draftKey,
     fields: {
-      company:  $('company').value,  country: $('country').value,
-      phone:    $('phone').value,    contact: $('contact').value,
-      email:    $('email').value,    notes:   $('notes').value,
-      existacct:$('existacct').value, newacct: $('newacct').value,
-      scope:  (document.querySelector('input[name=scope]:checked')  || {}).value || '',
-      entity: (document.querySelector('input[name=entity]:checked') || {}).value || ''
+      company:$('company').value, country:$('country').value, phone:$('phone').value,
+      contact:$('contact').value, email:$('email').value, notes:$('notes').value,
+      existacct:$('existacct').value, newacct:$('newacct').value,
+      scope: (document.querySelector('input[name=scope]:checked')||{}).value || '',
+      entity:(document.querySelector('input[name=entity]:checked')||{}).value || ''
     },
-    kinds:    [...state.kinds],
-    items:    state.items,
-    services: [...state.services],
-    serviceAlloc: state.serviceAlloc,
-    // File objects cannot be serialised; only the entity's typed details survive.
+    selected: [...state.selected],
+    alloc: state.alloc,
+    // File objects cannot be serialised; only the typed details survive.
     entities: state.entities.map(e => ({ id:e.id, name:e.name, regNumber:e.regNumber, trn:e.trn })),
-    seq: state.seq, eSeq: state.eSeq, aSeq: state.aSeq
+    eSeq: state.eSeq, aSeq: state.aSeq
   };
 }
 
@@ -1570,32 +1262,17 @@ function restoreState(d){
     $('f_newacct').hidden   = f.scope !== 'New account';
   }
 
-  state.kinds = new Set(Array.isArray(d.kinds) ? d.kinds : []);
-  document.querySelectorAll('.tog[data-kind]').forEach(t =>
-    t.setAttribute('aria-checked', String(state.kinds.has(t.dataset.kind))));
-
-  state.seq  = Number(d.seq)  || 0;
   state.eSeq = Number(d.eSeq) || 0;
   state.aSeq = Number(d.aSeq) || 0;
-
-  // Built explicitly rather than via blankRow(), which would bump state.seq
-  // once per restored row and hand the next new row a colliding id.
-  state.items = (Array.isArray(d.items) ? d.items : []).map(r => ({
-    id: Number(r.id) || ++state.seq,
-    name: r.name || '', type: r.type || '', parentOutlet: r.parentOutlet || '',
-    address: r.address || '', cloneFrom: r.cloneFrom || '',
-    billsUnder: r.billsUnder || '', details: r.details || ''
-  }));
-
   state.entities = (Array.isArray(d.entities) ? d.entities : []).map(e => ({
-    id: e.id, name: e.name || '', regNumber: e.regNumber || '', trn: e.trn || '',
-    docs: { registration:[], vat:[], address:[] }
+    id:e.id, name:e.name || '', regNumber:e.regNumber || '', trn:e.trn || '',
+    docs:{ registration:[], vat:[], address:[] }
   }));
 
-  state.serviceAlloc = d.serviceAlloc && typeof d.serviceAlloc === 'object' ? d.serviceAlloc : {};
-  state.services = new Set(Array.isArray(d.services) ? d.services : []);
-  $('svcBody').querySelectorAll('.tog').forEach(t =>
-    t.setAttribute('aria-checked', String(state.services.has(t.dataset.svc))));
+  state.alloc = d.alloc && typeof d.alloc === 'object' ? d.alloc : {};
+  state.selected = new Set(Array.isArray(d.selected) ? d.selected : []);
+  document.querySelectorAll('.tog[data-item]').forEach(t =>
+    t.setAttribute('aria-checked', String(state.selected.has(t.dataset.item))));
 
   const entRadio = f.entity && document.querySelector(`input[name=entity][value="${CSS.escape(f.entity)}"]`);
   if (entRadio){
@@ -1603,16 +1280,13 @@ function restoreState(d){
     $('docsCard').hidden = f.entity === 'Same legal entity';
   }
 
-  syncSections();
   renderEntities();
   syncKsaBlocks();
-  renderItems();
   renderAllAlloc();
+  refreshBillsOptions();
   renderSummary();
   restoring = false;
-
-  const hadDocs = state.entities.length > 0;
-  draftNote(hadDocs
+  draftNote(state.entities.length
     ? 'Draft restored. Any documents you attached before need adding again.'
     : 'Draft restored.', 'ok');
 }
@@ -1629,18 +1303,17 @@ async function saveDraft(silent){
     if (!res.ok) throw new Error('Save failed (' + res.status + ')');
     const out = await res.json();
     draftKey = out.key;
-    if (!silent){
+    if (silent){
+      draftNote('Draft saved automatically.', 'ok');
+    } else {
       $('draftUrl').value = out.draft_url;
       $('linkBox').hidden = false;
       draftNote('Saved. This link reopens your request for ' + out.expiresInDays + ' days.', 'ok');
-    } else {
-      draftNote('Draft saved automatically.', 'ok');
     }
   } catch (err){
-    // Autosave failing is not worth alarming someone mid-form; an explicit
-    // save is, because they are waiting on a link.
-    if (silent) draftNote('');
-    else draftNote(err.message + '. Your answers are still on screen.', 'bad');
+    // Autosave failing quietly is fine; an explicit save is not, because
+    // someone is waiting on a link.
+    if (silent) draftNote(''); else draftNote(err.message + '. Your answers are still here.', 'bad');
   } finally { draftBusy = false; }
 }
 
@@ -1656,12 +1329,9 @@ async function loadDraft(key){
   try {
     const res = await fetch(DRAFT_BASE + '/draft/load?key=' + encodeURIComponent(key));
     if (!res.ok) throw new Error(res.status === 404 ? 'That link has expired or does not exist.' : 'Could not load (' + res.status + ')');
-    const out = await res.json();
     draftKey = key;
-    restoreState(out.data);
-  } catch (err){
-    draftNote(err.message + ' Start a new request below.', 'bad');
-  }
+    restoreState((await res.json()).data);
+  } catch (err){ draftNote(err.message + ' Start a new request below.', 'bad'); }
 }
 
 /* ============================================================
@@ -1672,8 +1342,18 @@ const clearErr = id => $(id).classList.remove('bad');
 function showTop(msg){ $('topErrText').textContent = msg; $('topErr').hidden = false; }
 function hideTop(){ $('topErr').hidden = true; }
 
+function scrollToFirstProblem(){
+  const first = document.querySelector('.field.bad, .bad-cell, .docblock.bad');
+  if (!first) return;
+  if (typeof first.scrollIntoView === 'function') first.scrollIntoView({ behavior:'smooth', block:'center' });
+  const focusable = first.querySelector('input:not([disabled]), select:not([disabled]), textarea:not([disabled])');
+  if (focusable) setTimeout(() => focusable.focus({ preventScroll:true }), 320);
+}
+
 function validate(){
-  ['f_company','f_country','f_contact','f_email','f_phone','f_scope','f_newacct','f_existacct','f_kinds','f_svc','f_entity'].forEach(clearErr);
+  ['f_company','f_country','f_contact','f_email','f_phone','f_scope','f_newacct','f_existacct',
+   'f_products','f_svc','f_entity'].forEach(clearErr);
+  document.querySelectorAll('.bad-cell').forEach(el => el.classList.remove('bad-cell'));
   const problems = [];
 
   if (!$('company').value.trim()){ setErr('f_company'); problems.push('your company or group name'); }
@@ -1681,6 +1361,7 @@ function validate(){
   if (!$('contact').value.trim()){ setErr('f_contact'); problems.push('your name'); }
   if (!$('phone').value.trim()){ setErr('f_phone'); problems.push('a phone number'); }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test($('email').value.trim())){ setErr('f_email'); problems.push('a valid email'); }
+
   const scope = document.querySelector('input[name=scope]:checked');
   if (!scope){ setErr('f_scope'); problems.push('where the expansion should sit'); }
   if (scope && scope.value === 'New account' && !$('newacct').value.trim()){
@@ -1689,26 +1370,12 @@ function validate(){
   if (scope && scope.value === 'Existing account' && !$('existacct').value.trim()){
     setErr('f_existacct'); problems.push('your existing account name');
   }
-  if (!state.kinds.size){ setErr('f_kinds'); problems.push('what you are adding'); }
 
-  const needsItems = state.kinds.has('branch') || state.kinds.has('costcenter');
-  itemError('');
-  if (needsItems){
-    const gaps = markRowGaps();
-    if (!filledRows().length){
-      itemError('Add at least one outlet or cost center.');
-      problems.push('at least one outlet or cost center');
-    } else if (gaps){
-      itemError('Every row needs a name, a type and a clone source. Outlets also need an address, cost centers need the outlet they belong to, and once you add a billing entity every row needs one. Write "none" as a clone source to set up fresh.');
-      problems.push('the highlighted rows completed');
-    }
-  }
-  if (state.kinds.has('service') && !state.services.size){ setErr('f_svc'); problems.push('at least one service or feature'); }
+  if (!state.selected.size){ setErr('f_products'); problems.push('at least one product or feature'); }
 
-  $('svcBody').querySelectorAll('td.bills').forEach(td => td.classList.remove('bad-cell'));
   let missingEntity = 0, badQty = 0;
-  CONFIG.services.filter(s => state.services.has(s.id)).forEach(s => {
-    const cell = $('svcBody').querySelector(`[data-alloc="${s.id}"]`);
+  CATALOGUE().filter(s => state.selected.has(s.id)).forEach(s => {
+    const cell = document.querySelector(`[data-alloc="${s.id}"]`);
     allocLines(s.id).forEach(l => {
       const noEntity = billsRequired() && !l.entity;
       const noQty    = !(Number(l.qty) >= 1);
@@ -1717,11 +1384,12 @@ function validate(){
       if ((noEntity || noQty) && cell) cell.closest('td').classList.add('bad-cell');
     });
   });
-  if (missingEntity) problems.push('a billing entity on each feature line');
-  if (badQty) problems.push('a quantity of at least 1 on each feature line');
+  if (missingEntity) problems.push('a billing entity on each line');
+  if (badQty) problems.push('a quantity of at least 1 on each line');
 
   const entity = document.querySelector('input[name=entity]:checked');
   if (!entity){ setErr('f_entity'); problems.push('the billing entity answer'); }
+
   entError('');
   $('entityList').querySelectorAll('.field, .docblock').forEach(el => el.classList.remove('bad'));
 
@@ -1740,7 +1408,6 @@ function validate(){
     if (!e.name.trim()){      flagField('name');      gaps.add('a name'); }
     if (!e.regNumber.trim()){ flagField('regNumber'); gaps.add('a registration or license number'); }
     if (!e.trn.trim()){       flagField('trn');       gaps.add('a TRN or VAT number'); }
-    // in Saudi the commercial address pack is part of the standard set
     DOC_KINDS.filter(k => !k.ksaOnly || inKSA()).forEach(k => {
       if (e.docs[k.id].length) return;
       const db = block && block.querySelector(`.docblock[data-dockind="${k.id}"]`);
@@ -1750,7 +1417,6 @@ function validate(){
              : 'a registration document');
     });
   });
-
   if (gaps.size){
     entError('Each billing entity needs ' + [...gaps].join(', ') + '.');
     problems.push('the billing entity details completed');
@@ -1768,20 +1434,38 @@ function validate(){
 /* ============================================================
    PAYLOAD + SUBMIT
    ============================================================ */
-// Regenerated only once a submission has landed, so every retry of the same
-// attempt carries the same nonce and the Worker can recognise the replay.
+function lineItems(list){
+  return list.filter(s => state.selected.has(s.id)).map(s => ({
+    id: s.id,
+    name: s.name,
+    totalQuantity: allocTotal(s.id),
+    allocations: allocLines(s.id).map(l => ({
+      billsUnder: entityLabel(l.entity) || DEFAULT_ENTITY,
+      quantity: Number(l.qty) || 0
+    }))
+  }));
+}
+
+function buildSubject(){
+  const bits = CATALOGUE().filter(s => state.selected.has(s.id))
+    .map(s => allocTotal(s.id) + ' ' + s.name);
+  return 'Expansion request: ' + ($('company').value.trim() || 'account') +
+         ' (' + (bits.join(', ') || 'no items') + ')';
+}
+
+// One nonce per attempt, rotated only once a submission has landed, so every
+// retry of the same attempt carries the same value and the Worker recognises
+// the replay instead of creating a second deal.
 let submissionNonce = newNonce();
 function newNonce(){
-  if (crypto && crypto.randomUUID) return crypto.randomUUID().replace(/-/g, '');
-  return String(Date.now()) + Math.random().toString(36).slice(2, 12);
+  return (crypto && crypto.randomUUID)
+    ? crypto.randomUUID().replace(/-/g, '')
+    : String(Date.now()) + Math.random().toString(36).slice(2, 12);
 }
 
 function buildPayload(){
   const entity = document.querySelector('input[name=entity]:checked');
   const scope  = document.querySelector('input[name=scope]:checked');
-  const rows   = filledRows().filter(rowReady);
-  const cc     = rows.filter(i => i.type === 'Cost center');
-  const br     = rows.filter(i => i.type !== 'Cost center');
   return {
     type: 'expansion_request',
     submittedAt: new Date().toISOString(),
@@ -1791,39 +1475,22 @@ function buildPayload(){
       existingAccountName: $('existacct').value.trim() || null,
       newAccountName:      $('newacct').value.trim() || null
     },
-    counts: { outlets: br.length, costCenters: cc.length, features: state.services.size },
     requester: {
       account: $('company').value.trim(),
       country: $('country').value || null,
       name:    $('contact').value.trim(),
       email:   $('email').value.trim(),
-      phone:   $('phone').value.trim() || null
+      phone:   $('phone').value.trim()
     },
-    adding: [...state.kinds],
-    items: rows.map(r => ({
-      name: r.name.trim(),
-      type: r.type,
-      address: needsAddress(r) ? r.address.trim() : null,
-      parentOutlet: needsParent(r) ? r.parentOutlet.trim() : null,
-      cloneFrom: r.cloneFrom.trim(),
-      billsUnder: entityLabel(r.billsUnder) || DEFAULT_ENTITY,
-      details: r.details.trim() || null
-    })),
-    features: CONFIG.services.filter(s => state.services.has(s.id)).map(s => ({
-      name: s.name,
-      totalQuantity: allocTotal(s.id),
-      allocations: allocLines(s.id).map(l => ({
-        billsUnder: entityLabel(l.entity) || DEFAULT_ENTITY,
-        quantity: Number(l.qty) || 0
-      }))
-    })),
+    products: lineItems(CONFIG.products),
+    features: lineItems(CONFIG.services),
     billing: {
       sameLegalEntity: entity ? entity.value : null,
       entities: state.entities.filter(e => e.name.trim()).map(e => ({
         name:               e.name.trim(),
         registrationNumber: e.regNumber.trim() || null,
         trn:                e.trn.trim() || null,
-        documents:    DOC_KINDS.reduce((acc, k) => {
+        documents: DOC_KINDS.reduce((acc, k) => {
           acc[k.id] = e.docs[k.id].map(f => ({
             filename: f.name, sizeBytes: f.size, type: f.type || extOf(f.name)
           }));
@@ -1841,26 +1508,12 @@ function buildPayload(){
   };
 }
 
-function buildSubject(){
-  const bits = [];
-  const rows = filledRows().filter(rowReady);
-  const cc = rows.filter(i => i.type === 'Cost center').length;
-  const br = rows.length - cc;
-  if (br) bits.push(br + (br === 1 ? ' outlet' : ' outlets'));
-  if (cc) bits.push(cc + (cc === 1 ? ' cost center' : ' cost centers'));
-  if (state.services.size) bits.push(state.services.size + (state.services.size === 1 ? ' feature' : ' features'));
-  return 'Expansion request: ' + ($('company').value.trim() || 'account') + ' (' + (bits.join(', ') || 'no items') + ')';
-}
-
-// walks the page in document order so the customer is taken to the first gap,
-// whether that is a plain field or a cell inside one of the tables
-function scrollToFirstProblem(){
-  const first = document.querySelector('.field.bad, .bad-cell, .docblock.bad');
-  if (!first) return;
-  if (typeof first.scrollIntoView === 'function') first.scrollIntoView({ behavior:'smooth', block:'center' });
-  const focusable = first.querySelector('input:not([disabled]), select:not([disabled]), textarea:not([disabled])');
-  if (focusable) setTimeout(() => focusable.focus({ preventScroll:true }), 320);
-}
+const readAsBase64 = file => new Promise((res, rej) => {
+  const r = new FileReader();
+  r.onload  = () => res(String(r.result).split(',')[1]);
+  r.onerror = () => rej(new Error('Could not read ' + file.name));
+  r.readAsDataURL(file);
+});
 
 async function submitRequest(){
   if (!validate()) return;
@@ -1876,13 +1529,11 @@ async function submitRequest(){
       let body;
 
       if (allFiles().length && CONFIG.uploadMode === 'multipart'){
-        // multipart: the JSON travels in a "payload" field alongside the files
         body = new FormData();
         body.append('payload', JSON.stringify(payload));
         // fieldname encodes which entity and which document pack each file is
         state.entities.forEach((e, i) => DOC_KINDS.forEach(k =>
           e.docs[k.id].forEach(f => body.append(`documents[${i}][${k.id}]`, f, f.name))));
-        // no Content-Type header: the browser sets the multipart boundary
       } else {
         if (allFiles().length && CONFIG.uploadMode === 'base64'){
           btn.textContent = 'Reading files...';
@@ -1905,13 +1556,13 @@ async function submitRequest(){
       submissionNonce = newNonce();      // this attempt is done; the next is new
       showDone(payload, false);
     } else {
-      showDone(payload, true);   // preview mode
+      showDone(payload, true);
     }
   } catch (err){
     btn.disabled = false;
     btn.textContent = 'Submit request';
     showTop('Could not submit: ' + err.message + '. Nothing was sent, so your answers are still here. Try again in a moment.');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (typeof window.scrollTo === 'function') window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 }
 
@@ -1920,56 +1571,46 @@ function showDone(payload, preview){
   $('doneView').hidden = false;
   $('doneMsg').textContent = preview
     ? 'Validation passed and the payload below is ready to post. Set CONFIG.webhookUrl to send it for real.'
-    : 'Your Supy team will confirm scope and timeline within one business day, and flag anything else needed from you.';
+    : 'We will confirm scope and timeline within one business day, and flag anything else needed from you.';
   $('doneDest').textContent = preview
-    ? 'Preview mode: nothing was submitted.' + (allFiles().length ? ' The ' + allFiles().length + ' attached file(s) are listed in the payload but not uploaded.' : '')
+    ? 'Preview mode: nothing was submitted.' +
+      (allFiles().length ? ' The ' + allFiles().length + ' attached file(s) are listed in the payload but not uploaded.' : '')
     : 'Reference: ' + payload.summary;
   $('payloadBox').hidden = !preview;
   $('copyBtn').hidden = !preview;
   if (preview) $('payloadBox').textContent = JSON.stringify(payload, null, 2);
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (typeof window.scrollTo === 'function') window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function resetAll(){
-  state.kinds.clear(); state.services.clear(); state.items = []; state.seq = 0; state.eSeq = 0;
-  itemError('');
-  state.entities = []; state.serviceAlloc = {}; state.aSeq = 0;
+  state.selected.clear(); state.alloc = {}; state.aSeq = 0;
+  state.entities = []; state.eSeq = 0;
   state.pendingTarget = null; state.pendingEntityId = null;
-  submissionNonce = newNonce();
-  draftKey = null; draftNote(''); $('linkBox').hidden = true;
-  $('docsCard').hidden = true;
-  entError(''); renderEntities();
-  document.querySelectorAll('.tog[data-kind]').forEach(t => t.setAttribute('aria-checked','false'));
+
   document.querySelectorAll('input[type=text],input[type=email],input[type=tel],textarea').forEach(i => i.value = '');
   document.querySelectorAll('select').forEach(s => s.value = '');
-  syncKsaBlocks();
-  detectCountry();
   document.querySelectorAll('input[name=entity],input[name=scope]').forEach(r => r.checked = false);
+  document.querySelectorAll('.field').forEach(f => f.classList.remove('bad'));
+  document.querySelectorAll('.tog[data-item]').forEach(t => t.setAttribute('aria-checked','false'));
+  submissionNonce = newNonce();
+  draftKey = null; draftNote(''); $('linkBox').hidden = true;
+
   $('f_newacct').hidden = true;
   $('f_existacct').hidden = true;
-  document.querySelectorAll('.field').forEach(f => f.classList.remove('bad'));
-  $('svcBody').querySelectorAll('.tog').forEach(t => t.setAttribute('aria-checked','false'));
+  $('docsCard').hidden = true;
   $('h1dyn').textContent = '';
-  hideTop(); syncSections(); renderSummary();
+  hideTop(); entError('');
+  renderEntities(); renderAllAlloc(); refreshBillsOptions(); renderSummary();
+  syncKsaBlocks(); detectCountry();
+
   const b = $('submitBtn'); b.disabled = false; b.textContent = 'Submit request';
   $('doneView').hidden = true; $('formView').hidden = false;
-  window.scrollTo({ top: 0 });
+  if (typeof window.scrollTo === 'function') window.scrollTo({ top: 0 });
 }
 
 /* ============================================================
    WIRE UP
    ============================================================ */
-document.querySelectorAll('.tog[data-kind]').forEach(t => {
-  t.addEventListener('click', () => {
-    const on = t.getAttribute('aria-checked') === 'true';
-    if (on && !confirmDiscard(t.dataset.kind)) return;   // leave the toggle as it was
-    t.setAttribute('aria-checked', String(!on));
-    on ? state.kinds.delete(t.dataset.kind) : state.kinds.add(t.dataset.kind);
-    clearErr('f_kinds');
-    syncSections(); renderSummary();
-  });
-});
-
 document.querySelectorAll('input[name=scope]').forEach(r => {
   r.addEventListener('change', () => {
     $('f_newacct').hidden   = r.value !== 'New account';
@@ -1980,7 +1621,6 @@ document.querySelectorAll('input[name=scope]').forEach(r => {
 
 document.querySelectorAll('input[name=entity]').forEach(r => {
   r.addEventListener('change', () => {
-    // billing under the existing entity means there is no paperwork to collect
     const sameEntity = r.value === 'Same legal entity';
     $('docsCard').hidden = sameEntity;
 
@@ -1988,15 +1628,10 @@ document.querySelectorAll('input[name=entity]').forEach(r => {
       state.entities = [];
       state.pendingTarget = null;
       state.pendingEntityId = null;
-      state.items.forEach(row => row.billsUnder = '');
-      Object.values(state.serviceAlloc).forEach(lines => {
-        lines.length = 1;
-        lines[0].entity = '';
-      });
-      renderAllAlloc();
+      Object.values(state.alloc).forEach(lines => { lines.length = 1; lines[0].entity = ''; });
       entError('');
       renderEntities();
-      renderItems();
+      renderAllAlloc();
     } else if (r.value === 'Different legal entity' && !state.entities.length){
       addEntity();
     }
@@ -2004,25 +1639,19 @@ document.querySelectorAll('input[name=entity]').forEach(r => {
   });
 });
 
-// echo the account name into the title, the way the portal does
 $('company').addEventListener('input', e => {
   const v = e.target.value.trim();
   $('h1dyn').innerHTML = v ? ' - <span class="dyn">' + esc(v) + '</span>' : '';
 });
 
-// clear the error state as soon as someone starts fixing it
 document.querySelectorAll('.field input, .field select, .field textarea').forEach(el => {
   el.addEventListener('input', () => el.closest('.field').classList.remove('bad'));
 });
 
 $('country').innerHTML = ['<option value="">Select country</option>']
   .concat(COUNTRIES.map(c => `<option>${esc(c)}</option>`)).join('');
-$('country').addEventListener('change', () => {
-  clearErr('f_country');
-  syncKsaBlocks();
-});
+$('country').addEventListener('change', () => { clearErr('f_country'); syncKsaBlocks(); });
 
-$('addRowBtn').addEventListener('click', addRow);
 $('addEntBtn').addEventListener('click', addEntity);
 $('submitBtn').addEventListener('click', submitRequest);
 $('againBtn').addEventListener('click', resetAll);
@@ -2034,84 +1663,34 @@ $('copyBtn').addEventListener('click', async () => {
   } catch { $('copyBtn').textContent = 'Select the text above to copy'; }
 });
 
-// enter inside a row adds the next row rather than doing nothing
-$('itemBody').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && e.target.tagName === 'INPUT'){ e.preventDefault(); addRow(); }
-});
-
 $('saveBtn').addEventListener('click', () => saveDraft(false));
 $('copyLinkBtn').addEventListener('click', async () => {
-  const btn = $('copyLinkBtn');
+  const b = $('copyLinkBtn');
   try {
     await navigator.clipboard.writeText($('draftUrl').value);
-    btn.textContent = 'Copied';
-    setTimeout(() => btn.textContent = 'Copy', 1600);
-  } catch {
-    $('draftUrl').select();   // clipboard blocked: let them copy by hand
-    btn.textContent = 'Select';
-  }
+    b.textContent = 'Copied';
+    setTimeout(() => b.textContent = 'Copy', 1600);
+  } catch { $('draftUrl').select(); b.textContent = 'Select'; }
 });
 
-// Autosave covers typing anywhere on the page plus the toggles and pickers,
-// which do not emit input events of their own.
+// Covers typing plus the toggles and remove buttons, which emit no input event.
 document.addEventListener('input',  queueAutosave);
 document.addEventListener('change', queueAutosave);
-document.addEventListener('click', e => { if (e.target.closest('.tog, .xbtn, .btn.sec')) queueAutosave(); });
+document.addEventListener('click', e => { if (e.target.closest('.tog, .xbtn')) queueAutosave(); });
 
-buildServices();
+buildCatalogue(CONFIG.products, 'prodBody');
+buildCatalogue(CONFIG.services, 'svcBody');
 renderEntities();
-renderItems();
-syncSections();
+refreshBillsOptions();
 renderSummary();
 detectCountry();
 
-/* ---------- arriving from a link ----------
-   ?draft= reopens a request someone already started.
-   ?acct=  is a link a CSM minted for one account: it fills in who they are and
-           loads their existing outlets into the pickers, so "clone setup from"
-           stops being a name typed from memory. Neither field is restricted to
-           the list, because a client without a link must still be able to type. */
-async function loadPrefill(key){
-  if (!DRAFT_BASE) return;
-  try {
-    const res = await fetch(DRAFT_BASE + '/account/prefill?key=' + encodeURIComponent(key));
-    if (!res.ok) return;                       // an expired link just means a blank form
-    const d = await res.json();
-
-    state.knownOutlets = Array.isArray(d.outlets) ? d.outlets : [];
-
-    if (d.account && !$('company').value){
-      $('company').value = d.account;
-      $('h1dyn').innerHTML = ' - <span class="dyn">' + esc(d.account) + '</span>';
-    }
-    if (d.existingAccountName && !$('existacct').value){
-      const r = document.querySelector('input[name=scope][value="Existing account"]');
-      if (r && !document.querySelector('input[name=scope]:checked')){
-        r.checked = true;
-        $('f_existacct').hidden = false;
-      }
-      $('existacct').value = d.existingAccountName;
-    }
-    if (d.country && !$('country').value){
-      $('country').value = d.country;
-      syncKsaBlocks();
-    }
-
-    refreshOutletOptions();
-    if (state.knownOutlets.length){
-      draftNote(state.knownOutlets.length + ' of your existing outlets are available in the "belongs to" and "clone setup from" pickers.', 'ok');
-    }
-  } catch { /* offline or blocked: the form still works, just without the lists */ }
-}
-
-(async function arriveFromLink(){
-  const q = new URLSearchParams(location.search);
-  const acct = q.get('acct');
-  const draft = q.get('draft');
-  // Prefill first: a draft carries the client's own answers and must win.
-  if (acct)  await loadPrefill(acct);
-  if (draft) await loadDraft(draft);
+// A ?draft= link reopens a saved request rather than starting a blank one.
+(function resumeFromLink(){
+  const key = new URLSearchParams(location.search).get('draft');
+  if (key) loadDraft(key);
 })();
+
 </script>
 </body>
 </html>

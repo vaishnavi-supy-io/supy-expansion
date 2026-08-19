@@ -1,9 +1,24 @@
 # supy-expansion
 
 Self-service expansion request form for existing Supy clients, plus the Cloudflare
-Worker that receives it. A client says what they want to add — outlets, cost
-centers, features, in any combination — and the request arrives complete, attached
-to the right CRM record, instead of as an email thread someone has to unpick.
+Worker that receives it. A client picks what they want to add from a catalogue —
+outlet licences, CK and WH add-ons, extra cost centers, and features — sets a
+quantity for each, and splits any line across billing entities. The request
+arrives structured and attached to the right CRM record, instead of as an email
+thread someone has to unpick.
+
+**Catalogue**
+
+| Products | Features |
+|---|---|
+| Outlet (Back of House License) | Accounting Integration |
+| CK add on | AI Invoice Inbox |
+| WH add on | |
+| Additional cost center | |
+
+Every line carries a quantity and one or more billing allocations, so "5 AI
+Invoice Inbox under entity A and 3 under entity B" arrives as data rather than a
+sentence to interpret.
 
 **Nothing is provisioned automatically.** The Worker records and routes the
 request. Scope and timing are still confirmed by a human.
@@ -137,10 +152,11 @@ is checked again here, because the endpoint is public:
 
 - Requester identity, a valid email, country, and the account-scope answer,
   including the conditional existing/new account name.
-- Every row: name, type, and clone source. Address for outlets, central kitchens
-  and warehouses; parent outlet for cost centers.
-- Every feature allocation carries a quantity of at least 1.
-- **Every `billsUnder` names a declared entity.** A row pointing at an entity
+- Every line's `id` is a real catalogue item, and appears only once.
+- Every allocation quantity is a whole number of 1 or more.
+- **A line's `totalQuantity` equals the sum of its allocations**, so the headline
+  number and the split cannot disagree about what was ordered.
+- **Every `billsUnder` names a declared entity.** A line pointing at an entity
   that no longer exists is rejected rather than silently rebilled to the default.
 - Entity names are unique, so rows can be matched to an entity at all.
 - Each entity has a registration number, a TRN, a registration document and a

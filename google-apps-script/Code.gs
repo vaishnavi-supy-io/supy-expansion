@@ -14,20 +14,19 @@
  *
  * Writes two sheets:
  *   Requests — one row per submission, for tracking
- *   Items    — one row per outlet, cost center or feature allocation, for the
- *              person actually working through what needs setting up
+ *   Items    — one row per allocation line, so a product split across two
+ *              entities becomes two rows, for whoever provisions it
  */
 
 var REQUEST_HEADERS = [
   "Received", "Ref", "Account", "Contact", "Email", "Phone", "Country",
   "Sits under", "Existing account", "New account",
-  "Outlets", "Cost centers", "Features",
+  "Outlets", "CK add-ons", "WH add-ons", "Cost centers", "Features",
   "Same legal entity", "Billing entities", "Documents", "Notes", "Summary"
 ];
 
 var ITEM_HEADERS = [
-  "Received", "Ref", "Account", "Kind", "Name", "Type",
-  "Belongs to", "Address", "Clone from", "Qty", "Bills under", "Details"
+  "Received", "Ref", "Account", "Kind", "Item", "Item ID", "Qty", "Bills under"
 ];
 
 function doPost(e) {
@@ -60,15 +59,15 @@ function doPost(e) {
       d.receivedAt || "", d.submissionId, d.account || "", d.contactName || "",
       d.contactEmail || "", d.contactPhone || "", d.country || "",
       d.scope || "", d.existingAccount || "", d.newAccount || "",
-      d.outletCount || 0, d.costCenterCount || 0, d.featureCount || 0,
+      d.outletCount || 0, d.ckAddonCount || 0, d.whAddonCount || 0,
+      d.costCenterCount || 0, d.featureCount || 0,
       d.sameLegalEntity || "", entities, docs, d.notes || "", d.summary || ""
     ]);
 
     (d.rows || []).forEach(function (r) {
       items.appendRow([
         d.receivedAt || "", d.submissionId, d.account || "",
-        r.kind || "", r.name || "", r.type || "", r.parent || "", r.address || "",
-        r.cloneFrom || "", r.quantity || "", r.billsUnder || "", r.details || ""
+        r.kind || "", r.name || "", r.itemId || "", r.quantity || "", r.billsUnder || ""
       ]);
     });
 

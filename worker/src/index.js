@@ -59,8 +59,50 @@ const LIMITS = {
 };
 
 const DEFAULT_ENTITY = "Our existing account entity";
-const SITE_TYPES     = ["Outlet", "Central Kitchen", "Warehouse"];
-const ALL_TYPES      = [...SITE_TYPES, "Cost center", "Not sure"];
+
+// HubSpot's deal "country" property is an enumeration, and nine of the names in
+// the form's list are not options in it. Writing an unlisted value silently
+// drops the field, so the form's name is translated before it is sent.
+// Israel is absent from HubSpot's list entirely — not a spelling difference —
+// so it maps to null and is left unset rather than guessed at.
+const HS_COUNTRY = {
+  "Czechia":         "Czech Republic",
+  "Eswatini":        "Swaziland",
+  "Ivory Coast":     "Cote d'Ivoire",
+  "Macao":           "Macau",
+  "Myanmar":         "Myanmar (Burma)",
+  "North Macedonia": "Macedonia (FYROM)",
+  "Timor-Leste":     "East Timor",
+  "United States":   "United States of America",
+  "Israel":          null,
+};
+const hsCountry = name => {
+  const n = str(name);
+  if (!n) return null;
+  return Object.prototype.hasOwnProperty.call(HS_COUNTRY, n) ? HS_COUNTRY[n] : n;
+};
+
+// Pipelines, stages and properties, read from the portal rather than guessed.
+const HS = {
+  onboardingPipeline: "21524094",
+  salesPipeline:      "21726624",   // Sales Pipeline Supy 360
+  proposalSentStage:  "51997768",
+  handoffStage:       "1091553684",
+  accountOwnerProp:   "account_owner",   // labelled "Account Manager"
+  retailerIdProp:     "retailer_id",
+};
+
+// The catalogue the form offers. Ids are validated against this, so a
+// hand-rolled payload cannot invent a product that is not sold.
+const CATALOGUE = {
+  outlet:       "Outlet (Back of House License)",
+  ck_addon:     "CK add on",
+  wh_addon:     "WH add on",
+  cost_center:  "Additional cost center",
+  accounting:   "Accounting Integration",
+  invoiceinbox: "AI Invoice Inbox",
+};
+const PRODUCT_IDS = ["outlet", "ck_addon", "wh_addon", "cost_center"];
 const DOC_KINDS      = ["registration", "vat", "address"];
 const DOC_LABELS     = { registration: "Registration", vat: "VAT / TRN", address: "Commercial address" };
 const KSA            = "Saudi Arabia";
@@ -280,9 +322,11 @@ async function handleWebhook(request, env, ctx) {
     // its last edit lands, so it can disagree with the rows actually sent.
     summary: buildSubject(payload),
     counts: {
-      outlets:     payload.items.filter(i => i.type !== "Cost center").length,
-      costCenters: payload.items.filter(i => i.type === "Cost center").length,
-      features:    payload.features.length,
+      outlets:      unitsOf(payload, "outlet"),
+      centralKitchens: unitsOf(payload, "ck_addon"),
+      warehouses:   unitsOf(payload, "wh_addon"),
+      costCenters:  unitsOf(payload, "cost_center"),
+      features:     payload.features.length,
       documents:   documents.length,
     },
     details: results,
@@ -433,12 +477,22 @@ function normalise(p) {
   p.requester    = p.requester    || {};
   p.accountScope = p.accountScope || {};
   p.billing      = p.billing      || {};
-  p.items    = Array.isArray(p.items)    ? p.items    : [];
+  p.products = Array.isArray(p.products) ? p.products : [];
   p.features = Array.isArray(p.features) ? p.features : [];
-  p.adding   = Array.isArray(p.adding)   ? p.adding   : [];
+  // Every line, product or feature, has the same shape: id, name, quantity,
+  // and the entities that quantity is split across.
+  p.lines = [...p.products, ...p.features];
   p.billing.entities = Array.isArray(p.billing.entities) ? p.billing.entities : [];
   p.documents = Array.isArray(p.documents) ? p.documents : [];
 }
+
+// Units ordered of one catalogue id, across every entity it is split over.
+const unitsOf = (p, id) => {
+  const line = p.lines.find(l => str(l.id) === id);
+  if (!line) return 0;
+  return (Array.isArray(line.allocations) ? line.allocations : [])
+    .reduce((n, a) => n + (Number(a.quantity) || 0), 0);
+};
 
 const str  = v => (v === null || v === undefined ? "" : String(v)).trim();
 const isEmail = v => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(str(v));
@@ -469,55 +523,53 @@ function validate(p, files) {
     problems.push("accountScope.existingAccountName is required for an existing account");
   }
 
-  if (!p.adding.length) problems.push("adding must name at least one of branch, costcenter, service");
-  if (!p.items.length && !p.features.length) {
-    problems.push("the request is empty: no outlets, cost centers or features");
+  if (!p.lines.length) {
+    problems.push("the request is empty: nothing was selected");
   }
 
-  // Declared billing entities. Rows and feature lines may only point at one of
-  // these, or at the account's existing entity.
+  // Declared billing entities. Lines may only point at one of these, or at the
+  // account's existing entity.
   const entities    = p.billing.entities;
   const entityNames = entities.map(e => str(e.name)).filter(Boolean);
   const knownEntity = new Set([...entityNames, DEFAULT_ENTITY]);
   const billsRequired = entityNames.length > 0;
 
   if (new Set(entityNames).size !== entityNames.length) {
-    problems.push("billing.entities contains duplicate names, so rows cannot be matched to an entity");
+    problems.push("billing.entities contains duplicate names, so lines cannot be matched to an entity");
   }
 
-  p.items.forEach((it, i) => {
-    const at   = `items[${i}]`;
-    const type = str(it.type);
-    if (!str(it.name))      problems.push(`${at}.name is required`);
-    if (!type)              problems.push(`${at}.type is required`);
-    else if (!ALL_TYPES.includes(type)) problems.push(`${at}.type "${type}" is not a recognised type`);
-    if (!str(it.cloneFrom)) problems.push(`${at}.cloneFrom is required (use "none" to set up fresh)`);
+  const seenIds = new Set();
+  p.lines.forEach((line, i) => {
+    const at = `lines[${i}]`;
+    const id = str(line.id);
 
-    if (SITE_TYPES.includes(type) && !str(it.address)) {
-      problems.push(`${at}.address is required for a ${type}`);
-    }
-    if (type === "Cost center" && !str(it.parentOutlet)) {
-      problems.push(`${at}.parentOutlet is required for a cost center`);
-    }
-    if (billsRequired && !knownEntity.has(str(it.billsUnder))) {
-      problems.push(`${at}.billsUnder "${str(it.billsUnder) || "(blank)"}" is not one of the declared billing entities`);
-    }
-  });
+    if (!id) problems.push(`${at}.id is required`);
+    else if (!CATALOGUE[id]) problems.push(`${at}.id "${id}" is not a product we offer`);
+    else if (seenIds.has(id)) problems.push(`${at}.id "${id}" appears more than once`);
+    seenIds.add(id);
 
-  p.features.forEach((f, i) => {
-    const at = `features[${i}]`;
-    if (!str(f.name)) problems.push(`${at}.name is required`);
-    const allocs = Array.isArray(f.allocations) ? f.allocations : [];
+    const allocs = Array.isArray(line.allocations) ? line.allocations : [];
     if (!allocs.length) problems.push(`${at}.allocations must have at least one line`);
+
+    let sum = 0;
     allocs.forEach((a, j) => {
       const qty = Number(a && a.quantity);
-      if (!Number.isFinite(qty) || qty < 1) {
-        problems.push(`${at}.allocations[${j}].quantity must be 1 or more`);
+      if (!Number.isFinite(qty) || qty < 1 || !Number.isInteger(qty)) {
+        problems.push(`${at}.allocations[${j}].quantity must be a whole number of 1 or more`);
+      } else {
+        sum += qty;
       }
       if (billsRequired && !knownEntity.has(str(a && a.billsUnder))) {
         problems.push(`${at}.allocations[${j}].billsUnder is not one of the declared billing entities`);
       }
     });
+
+    // The split must add up to the headline number, or the two disagree about
+    // what was actually ordered.
+    const total = Number(line.totalQuantity);
+    if (Number.isFinite(total) && sum && total !== sum) {
+      problems.push(`${at}.totalQuantity is ${total} but the allocations add up to ${sum}`);
+    }
   });
 
   const same = str(p.billing.sameLegalEntity);
@@ -825,23 +877,15 @@ function buildNote(p, documents, receivedAt, submissionId) {
   const r     = p.requester;
   const scope = p.accountScope;
 
-  const itemRows = p.items.map((it, i) => [
-    String(i + 1),
-    `<b>${esc(it.name)}</b>`,
-    esc(it.type),
-    esc(it.parentOutlet || "—"),
-    esc(it.address || "—"),
-    esc(it.cloneFrom),
-    esc(it.billsUnder || DEFAULT_ENTITY),
-    esc(it.details || "—"),
-  ]);
-
-  const featureRows = p.features.map(f => [
-    `<b>${esc(f.name)}</b>`,
-    esc(f.totalQuantity),
-    (Array.isArray(f.allocations) ? f.allocations : [])
-      .map(a => `${esc(a.quantity)} &times; ${esc(a.billsUnder || DEFAULT_ENTITY)}`).join("<br>") || "—",
-  ]);
+  const lineRows = p.lines.map(l => {
+    const allocs = Array.isArray(l.allocations) ? l.allocations : [];
+    const qty = allocs.reduce((n, a) => n + (Number(a.quantity) || 0), 0);
+    return [
+      `<b>${esc(CATALOGUE[str(l.id)] || l.name || l.id)}</b>`,
+      esc(qty),
+      allocs.map(a => `${esc(a.quantity)} &times; ${esc(a.billsUnder || DEFAULT_ENTITY)}`).join("<br>") || "—",
+    ];
+  });
 
   const entityRows = p.billing.entities.map(e => [
     `<b>${esc(e.name)}</b>`,
@@ -869,13 +913,10 @@ function buildNote(p, documents, receivedAt, submissionId) {
     `Sits under: <b>${esc(scope.target || "—")}</b><br>` +
     `Existing account: ${esc(scope.existingAccountName || "—")}<br>` +
     `New account name: ${esc(scope.newAccountName || "—")}<br>` +
-    `Adding: ${esc(p.adding.join(", ") || "—")}`,
 
-    `<h4 style='${H4}'>OUTLETS &amp; COST CENTERS (${p.items.length})</h4>`,
-    table(["#", "Name", "Type", "Belongs to", "Address", "Clone from", "Bills under", "Details"], itemRows),
 
-    `<h4 style='${H4}'>SERVICES / FEATURES (${p.features.length})</h4>`,
-    table(["Feature", "Qty", "Billing split"], featureRows),
+    `<h4 style='${H4}'>WHAT THEY ARE ADDING</h4>`,
+    table(["Item", "Qty", "Billing split"], lineRows),
 
     `<h4 style='${H4}'>BILLING</h4>`,
     `Same legal entity as existing: <b>${esc(p.billing.sameLegalEntity || "—")}</b>`,
@@ -1036,8 +1077,6 @@ async function sendSlack(env, p, documents, contactId, submissionId) {
     return false;
   }
 
-  const outlets = p.items.filter(i => i.type !== "Cost center");
-  const centers = p.items.filter(i => i.type === "Cost center");
   const hsLink  = contactId
     ? `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-1/${contactId}`
     : "https://app.hubspot.com/contacts/";
@@ -1051,28 +1090,24 @@ async function sendSlack(env, p, documents, contactId, submissionId) {
         { type: "mrkdwn", text: `*Contact:*\n${smk(p.requester.name)} (${smk(p.requester.email)})` },
         { type: "mrkdwn", text: `*Sits under:*\n${smk(p.accountScope.target || "—")}${p.accountScope.existingAccountName ? `\n${smk(p.accountScope.existingAccountName)}` : ""}` },
         { type: "mrkdwn", text: `*Country:*\n${smk(p.requester.country || "—")}` },
-        { type: "mrkdwn", text: `*Adding:*\n${outlets.length} outlet(s), ${centers.length} cost center(s), ${p.features.length} feature(s)` },
+        { type: "mrkdwn", text: `*Adding:*\n${p.lines.length} line item(s)` },
         { type: "mrkdwn", text: `*Billing:*\n${smk(p.billing.sameLegalEntity || "—")}` },
       ],
     },
   ];
 
-  if (p.items.length) {
-    const lines = p.items.map(i => {
-      const where = i.type === "Cost center" ? `inside ${i.parentOutlet}` : (i.address || "no address");
-      const bills = i.billsUnder && i.billsUnder !== DEFAULT_ENTITY ? ` · bills: ${i.billsUnder}` : "";
-      return `• *${smk(i.name)}* — ${smk(i.type)} · ${smk(where)} · clone: ${smk(i.cloneFrom)}${smk(bills)}`;
+  if (p.lines.length) {
+    const rows = p.lines.map(l => {
+      const allocs = Array.isArray(l.allocations) ? l.allocations : [];
+      const qty = allocs.reduce((n, a) => n + (Number(a.quantity) || 0), 0);
+      // Only spell out the split when there is one; a single line reads better
+      // as just a quantity.
+      const split = allocs.length > 1
+        ? ` (${allocs.map(a => `${a.quantity} × ${smk(a.billsUnder || DEFAULT_ENTITY)}`).join(", ")})`
+        : "";
+      return `• *${smk(CATALOGUE[str(l.id)] || l.name || l.id)}* — ${qty}${split}`;
     }).join("\n");
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: clip(`*Outlets & cost centers*\n${lines}`) } });
-  }
-
-  if (p.features.length) {
-    const lines = p.features.map(f => {
-      const allocs = (Array.isArray(f.allocations) ? f.allocations : [])
-        .map(a => `${a.quantity} × ${smk(a.billsUnder || DEFAULT_ENTITY)}`).join(", ");
-      return `• *${smk(f.name)}* — ${smk(f.totalQuantity)} total${allocs ? ` (${allocs})` : ""}`;
-    }).join("\n");
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: clip(`*Services / features*\n${lines}`) } });
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: clip(`*What they are adding*\n${rows}`) } });
   }
 
   if (p.billing.entities.length) {
@@ -1121,12 +1156,11 @@ async function sendSlack(env, p, documents, contactId, submissionId) {
 }
 
 function buildSubject(p) {
-  const outlets = p.items.filter(i => i.type !== "Cost center").length;
-  const centers = p.items.filter(i => i.type === "Cost center").length;
-  const bits = [];
-  if (outlets) bits.push(`${outlets} outlet${outlets === 1 ? "" : "s"}`);
-  if (centers) bits.push(`${centers} cost center${centers === 1 ? "" : "s"}`);
-  if (p.features.length) bits.push(`${p.features.length} feature${p.features.length === 1 ? "" : "s"}`);
+  const bits = p.lines.map(l => {
+    const qty = (Array.isArray(l.allocations) ? l.allocations : [])
+      .reduce((n, a) => n + (Number(a.quantity) || 0), 0);
+    return `${qty} ${CATALOGUE[str(l.id)] || str(l.name) || str(l.id)}`;
+  });
   return `Expansion request: ${str(p.requester.account) || "account"} (${bits.join(", ") || "no items"})`;
 }
 
@@ -1267,31 +1301,17 @@ function formBaseUrl(env) {
 async function logToSheets(env, p, documents, receivedAt, submissionId) {
   if (!env.GOOGLE_SCRIPT_URL) return false;
 
-  const entityOf = name => (name && name !== DEFAULT_ENTITY ? name : "Existing account entity");
 
-  const rows = [
-    ...p.items.map(i => ({
-      kind:       i.type === "Cost center" ? "Cost center" : "Outlet",
-      name:       i.name,
-      type:       i.type,
-      parent:     i.parentOutlet || "",
-      address:    i.address || "",
-      cloneFrom:  i.cloneFrom || "",
-      quantity:   1,
-      billsUnder: entityOf(i.billsUnder),
-      details:    i.details || "",
-    })),
-    ...p.features.flatMap(f =>
-      (Array.isArray(f.allocations) ? f.allocations : []).map(a => ({
-        kind:       "Feature",
-        name:       f.name,
-        type:       "Feature",
-        parent:     "", address: "", cloneFrom: "",
-        quantity:   Number(a.quantity) || 0,
-        billsUnder: entityOf(a.billsUnder),
-        details:    "",
-      }))),
-  ];
+  // One row per allocation, so a line split across two entities becomes two
+  // rows. That is the form someone provisioning actually works from.
+  const rows = p.lines.flatMap(l =>
+    (Array.isArray(l.allocations) ? l.allocations : []).map(a => ({
+      itemId:     str(l.id),
+      name:       CATALOGUE[str(l.id)] || str(l.name) || str(l.id),
+      kind:       PRODUCT_IDS.includes(str(l.id)) ? "Product" : "Feature",
+      quantity:   Number(a.quantity) || 0,
+      billsUnder: a.billsUnder && a.billsUnder !== DEFAULT_ENTITY ? a.billsUnder : "Existing account entity",
+    })));
 
   try {
     const res = await fetch(env.GOOGLE_SCRIPT_URL, {
@@ -1309,9 +1329,11 @@ async function logToSheets(env, p, documents, receivedAt, submissionId) {
         scope:        p.accountScope.target || "",
         existingAccount: p.accountScope.existingAccountName || "",
         newAccount:      p.accountScope.newAccountName || "",
-        outletCount:     p.items.filter(i => i.type !== "Cost center").length,
-        costCenterCount: p.items.filter(i => i.type === "Cost center").length,
-        featureCount:    p.features.length,
+        outletCount:      unitsOf(p, "outlet"),
+        ckAddonCount:     unitsOf(p, "ck_addon"),
+        whAddonCount:     unitsOf(p, "wh_addon"),
+        costCenterCount:  unitsOf(p, "cost_center"),
+        featureCount:     p.features.length,
         sameLegalEntity: p.billing.sameLegalEntity || "",
         entities: p.billing.entities.map(e => ({
           name: e.name, registrationNumber: e.registrationNumber || "", trn: e.trn || "",
