@@ -37,8 +37,11 @@ put REFRESH_TOKEN "HubSpot OAuth refresh token"
 
 echo
 echo "── Slack ── where the team sees new requests"
-echo "   Create an incoming webhook for the channel that should receive these."
-echo "   Decide first: same channel as onboarding, or a new one?"
+echo "   Decided: the SAME channel supy-onboarding already posts to."
+echo "   Paste that same webhook URL here. If you do not have it to hand:"
+echo "     api.slack.com/apps -> your app -> Incoming Webhooks"
+echo "   Expansion posts are titled 'New Expansion Request', so they stay"
+echo "   distinguishable from onboarding in a shared channel."
 put SLACK_WEBHOOK_URL "https://hooks.slack.com/services/..."
 
 echo
