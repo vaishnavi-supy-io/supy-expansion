@@ -14,9 +14,11 @@ request. Scope and timing are still confirmed by a human.
 | Filled-in sample | https://vaishnavi-supy-io.github.io/supy-expansion/sample.html |
 | Endpoint | `https://supy-expansion.vaishnavi-5d1.workers.dev/webhook` |
 
-The form is live but the Worker is **not deployed yet** — submissions will fail
-until the secrets below are set and `wrangler deploy` has run. The sample page
-never posts anywhere; it renders the payload instead.
+The form and the Worker are both **deployed and live**. Drafts, prefill links
+and validation work now. Submissions are refused with a clear message until at
+least one delivery channel (HubSpot or Slack) has credentials — a request that
+reaches nobody is worse than one that is turned away. Run
+`worker/setup-secrets.sh` to fill them in.
 
 ```
 index.html  (client fills it in)
@@ -52,25 +54,23 @@ Cloudflare Worker
 ## Deploy
 
 ```bash
-cd worker
-npm install
+cd worker && npm install
+./setup-secrets.sh
+```
 
-# HubSpot — the same OAuth app supy-onboarding uses
-npx wrangler secret put CLIENT_ID
+The script prompts for each secret, pipes it straight into `wrangler secret put`,
+and redeploys. Values are never echoed, logged or written to disk, and any one
+can be skipped and filled in on a later run. To do it by hand instead:
+
+```bash
+npx wrangler secret put CLIENT_ID              # HubSpot, same as supy-onboarding
 npx wrangler secret put CLIENT_SECRET
 npx wrangler secret put REFRESH_TOKEN
-
-# Slack incoming webhook for the channel that should receive these
-npx wrangler secret put SLACK_WEBHOOK_URL
-
-# Cloudinary — same account as supy-onboarding, different path prefix
-npx wrangler secret put CLOUDINARY_CLOUD_NAME
-npx wrangler secret put CLOUDINARY_API_SECRET
+npx wrangler secret put SLACK_WEBHOOK_URL      # channel for new requests
+npx wrangler secret put CLOUDINARY_CLOUD_NAME  # document storage
 npx wrangler secret put CLOUDINARY_API_KEY
-
-# Guards /debug and /logs. Any long random string.
-npx wrangler secret put ADMIN_TOKEN
-
+npx wrangler secret put CLOUDINARY_API_SECRET
+npx wrangler secret put ADMIN_TOKEN            # new random string, guards /debug
 npx wrangler deploy
 ```
 

@@ -160,7 +160,21 @@ async function handleWebhook(request, env, ctx) {
     }
   }
 
-  // 2. Approximate rate limit. KV is eventually consistent, so a burst of
+  // 2. Refuse rather than swallow. A submission that reaches nobody is worse
+  //    than one that is turned away: the client sees "Request submitted" and
+  //    walks away while the request evaporates. That silent loss is the exact
+  //    failure this whole form exists to prevent, so if no delivery channel is
+  //    configured at all, say so instead of accepting it.
+  const channels = deliveryChannels(env);
+  if (!Object.values(channels).some(Boolean)) {
+    return json({
+      status: "error",
+      message: "This form is not accepting submissions yet. Please contact your Supy "
+             + "customer success manager directly so your request is not lost.",
+    }, 503, request, env);
+  }
+
+  // 3. Approximate rate limit. KV is eventually consistent, so a burst of
   //    parallel requests can slip past; it stops repeat submissions, not a
   //    determined flood.
   const ip = request.headers.get("CF-Connecting-IP") || "unknown";
@@ -168,7 +182,7 @@ async function handleWebhook(request, env, ctx) {
     return json({ status: "error", message: "Too many requests. Try again shortly." }, 429, request, env);
   }
 
-  // 3. Parse.
+  // 4. Parse.
   let parsed;
   try {
     parsed = await readSubmission(request);
@@ -177,13 +191,13 @@ async function handleWebhook(request, env, ctx) {
   }
   const { payload, files } = parsed;
 
-  // 4. Validate — the same rules the form enforces, re-checked here.
+  // 5. Validate — the same rules the form enforces, re-checked here.
   const problems = validate(payload, files);
   if (problems.length) {
     return json({ status: "error", message: "Validation failed", problems }, 400, request, env);
   }
 
-  // 4b. Idempotency. A double-click, a flaky connection retried by the browser,
+  // 5b. Idempotency. A double-click, a flaky connection retried by the browser,
   //     or an impatient second Submit must not become two CRM notes and two
   //     Slack messages. The client mints a nonce per attempt; a replay of one
   //     we have already finished returns the original outcome untouched.
@@ -198,7 +212,7 @@ async function handleWebhook(request, env, ctx) {
   const account      = payload.requester.account;
   const results      = [];
 
-  // 5. Documents → Cloudinary. Failures are recorded but do not sink the
+  // 6. Documents → Cloudinary. Failures are recorded but do not sink the
   //    submission: a request that reaches the team without its trade license
   //    is far better than one that is silently lost.
   let documents = [];
@@ -209,7 +223,7 @@ async function handleWebhook(request, env, ctx) {
   }
   attachDocumentUrls(payload, documents);
 
-  // 6. HubSpot.
+  // 7. HubSpot.
   let contactId = null;
   const token = await getHubspotToken(env);
   if (token) {
@@ -230,11 +244,11 @@ async function handleWebhook(request, env, ctx) {
     results.push("hubspot:auth-fail");
   }
 
-  // 7. Slack.
+  // 8. Slack.
   const slackOk = await sendSlack(env, payload, documents, contactId, submissionId);
   results.push(slackOk ? "slack:ok" : "slack:fail");
 
-  // 8. Email. The client receipt is gated on HubSpot having recognised the
+  // 9. Email. The client receipt is gated on HubSpot having recognised the
   //    contact, so this endpoint cannot be used to send Supy-branded mail to
   //    an arbitrary address.
   const internalOk = await sendInternalEmail(env, payload, documents, receivedAt, submissionId);
@@ -246,11 +260,11 @@ async function handleWebhook(request, env, ctx) {
     results.push("receipt:skipped");
   }
 
-  // 9. Google Sheets mirror.
+  // 10. Google Sheets mirror.
   const sheetsOk = await logToSheets(env, payload, documents, receivedAt, submissionId);
   results.push(sheetsOk ? "sheets:ok" : "sheets:fail");
 
-  // 10. Log, best-effort and off the response path.
+  // 11. Log, best-effort and off the response path.
   const logLine = `${receivedAt} | ${submissionId} | ${payload.requester.email} | ${account} | ${results.join(",")}`;
   if (ctx && typeof ctx.waitUntil === "function") {
     ctx.waitUntil(appendLog(env, logLine));
@@ -276,6 +290,17 @@ async function handleWebhook(request, env, ctx) {
 
   await rememberSubmission(env, nonce, response);
   return json(response, 200, request, env);
+}
+
+// Which downstream legs are actually configured. Used to refuse a submission
+// that could not reach anyone, and reported by /debug.
+function deliveryChannels(env) {
+  return {
+    hubspot: Boolean(env.CLIENT_ID && env.CLIENT_SECRET && env.REFRESH_TOKEN),
+    slack:   Boolean(env.SLACK_WEBHOOK_URL),
+    email:   Boolean(env.GMAIL_CLIENT_ID && env.GMAIL_CLIENT_SECRET && env.GMAIL_REFRESH_TOKEN),
+    sheets:  Boolean(env.GOOGLE_SCRIPT_URL),
+  };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1410,6 +1435,8 @@ function handleDebug(request, env) {
     LOGS_bound:            Boolean(env.LOGS),
     RATELIMIT_bound:       Boolean(env.RATELIMIT),
     DRAFTS_bound:          Boolean(env.DRAFTS),
+    deliveryChannels:      deliveryChannels(env),
+    acceptingSubmissions:  Object.values(deliveryChannels(env)).some(Boolean),
   }, 200, request, env);
 }
 
