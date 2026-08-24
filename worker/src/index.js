@@ -1179,81 +1179,104 @@ async function sendSlack(env, p, documents, contactId, submissionId, ctx = {}) {
   const hsLink  = contactId
     ? `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-1/${contactId}`
     : "https://app.hubspot.com/contacts/";
+  const hsDealLink = (id) => `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-3/${id}`;
+  const hsCoLink = (id) => `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-2/${id}`;
 
-  // Country → manager routing (new added process)
   const mgr = managersForCountry(str(p.requester.country), env);
-  const retailerLabel = p.accountScope.existingAccountName ? smk(p.accountScope.existingAccountName) : "—";
-  const retailerIdLabel = p.accountScope.existingRetailerId ? ` (ID: ${smk(p.accountScope.existingRetailerId)})` : "";
+  const retailer = str(p.accountScope.existingAccountName) || "";
+  const retailerId = str(p.accountScope.existingRetailerId) || "";
+  const scope = str(p.accountScope.target) || "—";
+  const scopeLine = scope === "Existing account" && retailer
+    ? `${smk(retailer)}${retailerId ? `  •  ID \`${smk(retailerId)}\`` : ""}`
+    : scope === "New account" && str(p.accountScope.newAccountName) ? `${smk(p.accountScope.newAccountName)} (new)` : smk(scope);
+
+  // Header: scannable at a glance — account + country
+  const headerTitle = `New Expansion Request — ${str(p.requester.account).slice(0,40) || "Account"} • ${str(p.requester.country) || ""}`.trim().slice(0,150);
+  const when = new Date().toLocaleString("en-AE", { dateStyle:"medium", timeStyle:"short", timeZone:"Asia/Dubai" });
 
   const blocks = [
-    { type: "header", text: { type: "plain_text", text: "🏗️ New Expansion Request", emoji: true } },
+    { type: "header", text: { type: "plain_text", text: `🏗️ ${headerTitle}`, emoji: true } },
+    { type: "context", elements: [{ type: "mrkdwn", text: `Ref \`${smk(submissionId).slice(0,8)}\` • ${smk(when)} • ${smk(p.requester.email)}${retailerId ? ` • Retailer \`${smk(retailerId)}\`` : ""}` }] },
     {
       type: "section",
       fields: [
-        { type: "mrkdwn", text: `*Account:*\n${smk(p.requester.account)}` },
-        { type: "mrkdwn", text: `*Contact:*\n${smk(p.requester.name)} (${smk(p.requester.email)})` },
-        { type: "mrkdwn", text: `*Sits under:*\n${smk(p.accountScope.target || "—")}${p.accountScope.existingAccountName ? `\n${retailerLabel}${retailerIdLabel}` : ""}` },
-        { type: "mrkdwn", text: `*Country:*\n${smk(p.requester.country || "—")}${mgr ? `\n_${smk(mgr.countryManager || "")}${mgr.slack ? ` ${mgr.slack}` : ""}_` : ""}` },
-        { type: "mrkdwn", text: `*Adding:*\n${p.lines.length} line item(s)` },
-        { type: "mrkdwn", text: `*Billing:*\n${smk(p.billing.sameLegalEntity || "—")}` },
+        { type: "mrkdwn", text: `*Account*\n${smk(p.requester.account)}` },
+        { type: "mrkdwn", text: `*Contact*\n${smk(p.requester.name)}\n${smk(p.requester.email)}\n${smk(p.requester.phone || "")}` },
+        { type: "mrkdwn", text: `*Country*\n${smk(p.requester.country || "—")}` },
+        { type: "mrkdwn", text: `*Scope*\n${scopeLine}` },
       ],
     },
   ];
 
-  if (mgr && (mgr.countryManager || mgr.accountManager || mgr.slack)) {
-    const mgrLine = [
-      mgr.countryManager ? `*Country Manager:* ${smk(mgr.countryManager)}${mgr.slack ? ` ${mgr.slack}` : ""}` : null,
-      mgr.accountManager ? `*Account Manager:* ${smk(mgr.accountManager)}` : null,
-    ].filter(Boolean).join("  •  ");
-    if (mgrLine) blocks.push({ type: "section", text: { type: "mrkdwn", text: `:busts_in_silhouette: ${mgrLine}` } });
+  // Routing: who owns this — immediately actionable for CSMs
+  const mgrLines = [];
+  if (mgr) {
+    if (mgr.countryManager) mgrLines.push(`Country Manager: *${smk(mgr.countryManager)}*${mgr.slack ? `  ${mgr.slack}` : ""}`);
+    if (mgr.accountManager) mgrLines.push(`Account Manager: *${smk(mgr.accountManager)}*`);
   }
-
-  // Onboarding → Sales mapping context
-  if (ctx.onboardingDeal) {
-    const od = ctx.onboardingDeal;
-    const odProps = od.properties || {};
-    const odId = od.id ? String(od.id) : "—";
-    const odStage = str(odProps.dealstage) || "—";
-    const odOwner = str(odProps.hubspot_owner_id) || "—";
-    const accOwner = str(odProps[HS.accountOwnerProp] || odProps.account_owner || "—");
-    const rid = str(odProps[HS.retailerIdProp] || p.accountScope.existingRetailerId || "—");
-    const pipeline = str(odProps.pipeline) || HS.onboardingPipeline;
-    const salesLink = ctx.salesDealId ? `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-3/${ctx.salesDealId}` : null;
-    blocks.push({ type: "section", text: { type: "mrkdwn", text:
-      `*Onboarding deal:* <https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-3/${odId}|${smk(odProps.dealname || odId)}>  •  Stage \`${smk(odStage)}\`  •  Pipeline \`${smk(pipeline)}\`\n` +
-      `*Retailer ID:* \`${smk(rid)}\`  •  *Deal Owner:* \`${smk(odOwner)}\`  •  *Account Owner:* \`${smk(accOwner)}\`` +
-      (salesLink ? `\n*New Sales deal (Supy 360):* <${salesLink}|${ctx.salesDealId}> — Proposal Sent, Existing Business, USD 0` : "\n_Sales deal creation pending — no deal created_")
-    }});
-    if (ctx.onboardingCompanyIds && ctx.onboardingCompanyIds.length) {
-      blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `Associated compan${ctx.onboardingCompanyIds.length === 1 ? "y" : "ies"}: ${ctx.onboardingCompanyIds.map(id => `<https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-2/${id}|${id}>`).join(", ")}` }] });
-    }
-  } else if (str(p.accountScope.target) === "Existing account" && p.accountScope.existingAccountName) {
-    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `:warning: No onboarding deal matched Retailer ID \`${smk(p.accountScope.existingRetailerId || p.accountScope.existingAccountName)}\` in pipeline ${HS.onboardingPipeline}` }] });
+  if (mgrLines.length) {
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: `:busts_in_silhouette:  ${mgrLines.join("  •  ")}` } });
+  } else if (str(p.requester.country)) {
+    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `:round_pushpin: Country: ${smk(p.requester.country)} — add COUNTRY_MANAGERS_JSON to @mention owner` }] });
   }
+  blocks.push({ type: "divider" });
 
+  // What they want — the core of the request
   if (p.lines.length) {
     const rows = p.lines.map(l => {
       const allocs = Array.isArray(l.allocations) ? l.allocations : [];
       const qty = allocs.reduce((n, a) => n + (Number(a.quantity) || 0), 0);
-      // Only spell out the split when there is one; a single line reads better
-      // as just a quantity.
-      const split = allocs.length > 1
-        ? ` (${allocs.map(a => `${a.quantity} × ${smk(a.billsUnder || DEFAULT_ENTITY)}`).join(", ")})`
-        : "";
-      return `• *${smk(CATALOGUE[str(l.id)] || l.name || l.id)}* — ${qty}${split}`;
+      const name = smk(CATALOGUE[str(l.id)] || l.name || l.id);
+      if (allocs.length <= 1) {
+        const where = allocs[0] ? smk(allocs[0].billsUnder || DEFAULT_ENTITY) : DEFAULT_ENTITY;
+        const isDefault = !allocs[0] || !allocs[0].billsUnder || allocs[0].billsUnder === DEFAULT_ENTITY;
+        return `• *${name}* — ${qty}${isDefault ? "" : `  → _${where}_`}`;
+      }
+      const split = allocs.map(a => `${a.quantity} × _${smk(a.billsUnder || DEFAULT_ENTITY)}_`).join(", ");
+      return `• *${name}* — *${qty} total* (${split})`;
     }).join("\n");
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: clip(`*What they are adding*\n${rows}`) } });
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: clip(`*What they’re adding*  (${p.lines.length} item${p.lines.length>1?"s":""}) — _nothing provisioned yet, CSM to confirm_\n${rows}`) } });
+  } else {
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: "_No line items — check form validation_" } });
   }
 
+  // Billing + notes — only if present, to avoid overwhelming
+  const billingSummary = smk(p.billing.sameLegalEntity || "—");
   if (p.billing.entities.length) {
     const lines = p.billing.entities.map(e =>
-      `• *${smk(e.name)}* — CRN ${smk(e.registrationNumber || "—")} · TRN ${smk(e.trn || "—")}`
+      `• *${smk(e.name)}*\n   CRN \`${smk(e.registrationNumber || "—")}\`  •  TRN \`${smk(e.trn || "—")}\``
     ).join("\n");
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: clip(`*Billing entities*\n${lines}`) } });
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: clip(`*Billing* — ${billingSummary}\n${lines}`) } });
+  } else {
+    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `*Billing:* ${billingSummary}` }] });
   }
 
-  if (p.notes) {
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: clip(`*Notes*\n${smk(p.notes)}`, 1200) } });
+  if (p.notes && str(p.notes)) {
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: clip(`*Customer note*\n>${smk(p.notes).split("\n").join("\n>")}`, 1400) } });
+  }
+
+  // CRM routing — only when we have context, kept short for CSMs
+  if (ctx.onboardingDeal) {
+    const od = ctx.onboardingDeal;
+    const odProps = od.properties || {};
+    const odId = od.id ? String(od.id) : "—";
+    const odName = smk(odProps.dealname || odId);
+    const odStage = smk(str(odProps.dealstage) || "—");
+    const odOwner = smk(str(odProps.hubspot_owner_id) || "—");
+    const accOwner = smk(str(odProps[HS.accountOwnerProp] || odProps.account_owner || "—"));
+    const rid = smk(str(odProps[HS.retailerIdProp] || retailerId || "—"));
+    const salesLink = ctx.salesDealId ? hsDealLink(ctx.salesDealId) : null;
+    blocks.push({ type: "divider" });
+    blocks.push({ type: "section", text: { type: "mrkdwn", text:
+      `*CRM routing* — Retailer \`${rid}\`\n` +
+      `Onboarding: <${hsDealLink(odId)}|${odName}>  •  Stage \`${odStage}\`  •  Owner \`${odOwner}\` → Account \`${accOwner}\`` +
+      (salesLink ? `\n→ New Sales 360: <${salesLink}|${ctx.salesDealId}>  _Proposal Sent • Existing Business • USD 0_` : `\n_→ Sales 360 deal not created_`)
+    }});
+    if (ctx.onboardingCompanyIds && ctx.onboardingCompanyIds.length) {
+      blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `Companies: ${ctx.onboardingCompanyIds.map(id => `<${hsCoLink(id)}|${id}>`).join(", ")}` }] });
+    }
+  } else if (scope === "Existing account" && retailer) {
+    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `:warning: No onboarding deal in \`${HS.onboardingPipeline}\` matched Retailer \`${smk(retailerId || retailer)}\` — CSM to verify retailer ID` }] });
   }
 
   const failed = documents.filter(d => !d.url);
