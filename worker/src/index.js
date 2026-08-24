@@ -431,8 +431,9 @@ async function handleWebhook(request, env, ctx) {
 // Which downstream legs are actually configured. Used to refuse a submission
 // that could not reach anyone, and reported by /debug.
 function deliveryChannels(env) {
+  const hasHubspot = Boolean((env.HUBSPOT_ACCESS_TOKEN || env.HUBSPOT_PAT || env.PAT) || (env.CLIENT_ID && env.CLIENT_SECRET && env.REFRESH_TOKEN));
   return {
-    hubspot: Boolean(env.CLIENT_ID && env.CLIENT_SECRET && env.REFRESH_TOKEN),
+    hubspot: hasHubspot,
     slack:   Boolean(env.SLACK_WEBHOOK_URL),
     email:   Boolean(env.GMAIL_CLIENT_ID && env.GMAIL_CLIENT_SECRET && env.GMAIL_REFRESH_TOKEN),
     sheets:  Boolean(env.GOOGLE_SCRIPT_URL),
@@ -804,9 +805,12 @@ function crmCompanyName(p) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// HubSpot
+// HubSpot — supports both OAuth (CLIENT_ID/SECRET/REFRESH_TOKEN) and Private App PAT (HUBSPOT_ACCESS_TOKEN)
+ // PAT is sent as Bearer token directly, no refresh needed.
 // ─────────────────────────────────────────────────────────────
 async function getHubspotToken(env) {
+  const pat = env.HUBSPOT_ACCESS_TOKEN || env.HUBSPOT_PAT || env.PAT || env.HS_ACCESS_TOKEN;
+  if (pat && pat.startsWith("pat-")) return pat.trim();
   if (!env.CLIENT_ID || !env.CLIENT_SECRET || !env.REFRESH_TOKEN) {
     console.error("HubSpot credentials not configured");
     return null;
@@ -1751,6 +1755,7 @@ function handleDebug(request, env) {
     return json({ error: "Unauthorized" }, 401, request, env);
   }
   return json({
+    HUBSPOT_ACCESS_TOKEN:  Boolean(env.HUBSPOT_ACCESS_TOKEN || env.HUBSPOT_PAT || env.PAT),
     CLIENT_ID:             Boolean(env.CLIENT_ID),
     CLIENT_SECRET:         Boolean(env.CLIENT_SECRET),
     REFRESH_TOKEN:         Boolean(env.REFRESH_TOKEN),
