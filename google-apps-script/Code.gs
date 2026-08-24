@@ -36,7 +36,7 @@ function doPost(e) {
       return reply({ status: "error", message: "Missing submissionId" });
     }
 
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var ss = getLogSpreadsheet();
     var requests = sheetFor(ss, "Requests", REQUEST_HEADERS);
     var items    = sheetFor(ss, "Items",    ITEM_HEADERS);
 
@@ -77,8 +77,26 @@ function doPost(e) {
   }
 }
 
-var ACCESS_SPREADSHEET_ID = "1raBGqWqxVaUcraY0gjR-CFQT3T2_TheemPfOpihmmFE";
-var ACCESS_SHEET_GID = 599203487;
+var DATA_SPREADSHEET_ID = "1raBGqWqxVaUcraY0gjR-CFQT3T2_TheemPfOpihmmFE";
+var DATA_SHEET_GID = 599203487;
+// Where Requests/Items are written. Leave null to use the spreadsheet this script is bound to.
+// IMPORTANT: Do NOT set this to the Data sheet — it refreshes daily and wipes your writes.
+var LOG_SPREADSHEET_ID = null; // e.g. "1AbC...logSheetId"
+var ACCESS_SPREADSHEET_ID = DATA_SPREADSHEET_ID;
+var ACCESS_SHEET_GID = DATA_SHEET_GID;
+
+function getLogSpreadsheet() {
+  var ss = null;
+  if (LOG_SPREADSHEET_ID) {
+    try { ss = SpreadsheetApp.openById(LOG_SPREADSHEET_ID); } catch (err) {}
+  }
+  if (!ss) ss = SpreadsheetApp.getActiveSpreadsheet();
+  // Guard: never write to the Data codebase sheet
+  try { if (ss.getId() === DATA_SPREADSHEET_ID) throw new Error("Refusing to write to Data sheet"); } catch (err) {
+    throw new Error("LOG_SPREADSHEET_ID must be a different spreadsheet than the Data codebase sheet. Create a new spreadsheet for Requests/Items and set its ID in LOG_SPREADSHEET_ID, or bind this script to that log spreadsheet.");
+  }
+  return ss;
+}
 
 function doGet(e) {
   try {
