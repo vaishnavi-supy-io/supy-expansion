@@ -790,6 +790,15 @@ async function detectCountry(){
     } catch { /* blocked or offline: fall through to timezone */ }
   }
   if (!guess){
+    const base = apiBase();
+    if (base){
+      try {
+        const r = await fetch(base + '/geo', { cache:'no-store' });
+        if (r.ok){ const j = await r.json(); guess = j.country || j.cfCountry || j.headerCountry || null; }
+      } catch { /* Worker geo unavailable, fall through */ }
+    }
+  }
+  if (!guess){
     try { guess = TZ_COUNTRY[Intl.DateTimeFormat().resolvedOptions().timeZone] || null; }
     catch { guess = null; }
   }

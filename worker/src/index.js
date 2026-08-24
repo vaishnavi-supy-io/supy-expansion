@@ -196,6 +196,9 @@ export default {
       if (url.pathname === "/retailers" && request.method === "GET") {
         return await handleRetailers(request, env);
       }
+      if (url.pathname === "/geo" && request.method === "GET") {
+        return handleGeo(request, env);
+      }
       if (url.pathname === "/logs" && request.method === "GET") {
         return await handleLogs(request, env);
       }
@@ -357,7 +360,6 @@ async function handleWebhook(request, env, ctx) {
             dealtype: "existingbusiness",
             country: countryForDeal || undefined,
             retailerId: retailerId || retailerName || undefined,
-            dealSource: "Live / Existing Customer",
           }, onboardingCompanyIds, contactId);
           if (salesDealId) {
             results.push(`salesDeal:created:${salesDealId}`);
@@ -374,6 +376,19 @@ async function handleWebhook(request, env, ctx) {
       }
     } else {
       results.push("salesDeal:skipped:no-retailer-id");
+    }
+    // Contact → onboarding companies (spec gap fix): link contact to the same companies as the onboarding deal, after we know them
+    if (contactId && onboardingCompanyIds.length) {
+      try {
+        for (const cid of onboardingCompanyIds) {
+          const assocRes = await fetch(`https://api.hubapi.com/crm/v3/associations/Contacts/Companies/batch/create`, {
+            method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ inputs: [{ from: { id: contactId }, to: { id: cid }, type: "contact_to_company" }] }),
+          });
+          if (!assocRes.ok) console.error("contact_to_company assoc failed", cid, assocRes.status, await assocRes.text().catch(()=> ""));
+        }
+        results.push(`contact:linked:${onboardingCompanyIds.length}companies`);
+      } catch (e) { console.error("contact link failed", String(e)); }
     }
   }
 
@@ -1487,6 +1502,14 @@ async function handleRetailers(request, env) {
   return json({ retailers }, 200, request, env);
 }
 
+function handleGeo(request, env) {
+  const cfCountry = request.cf && request.cf.country ? String(request.cf.country) : "";
+  const hdrCountry = request.headers.get("CF-IPCountry") || request.headers.get("cf-ipcountry") || "";
+  const country = cfCountry || hdrCountry || null;
+  // Also try to map via request.cf if available, else via header
+  return json({ country, cfCountry: cfCountry || null, headerCountry: hdrCountry || null }, 200, request, env);
+}
+
 async function retailersForEmailViaHubSpot(token, email) {
   const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
   // Find contact by email
@@ -1562,8 +1585,7 @@ async function getDealCompanyIds(token, dealId) {
 
 async function createSalesDeal(token, props, companyIds, contactId) {
   const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
-  // HubSpot property internal names: hubspot_owner_id, dealname, pipeline, dealstage, amount, deal_currency_code, dealtype, country, retailer_id
-  // deal_source is often a custom property; we try both deal_source and hs_analytics_source_2 if present, but never fail the deal if unknown.
+  // HubSpot: dealtype existingbusiness = Live/Existing Customer (spec's Deal Source). No separate deal_source property exists in this portal (checked via API), so we set dealtype only. hs_analytics_source is read-only and would fail.
   const hsProps = {
     dealname: props.dealname,
     pipeline: props.pipeline,
@@ -1575,11 +1597,6 @@ async function createSalesDeal(token, props, companyIds, contactId) {
     country: props.country || undefined,
     [HS.retailerIdProp]: props.retailerId || undefined,
   };
-  // Optional source property — try common names
-  if (props.dealSource) {
-    hsProps["deal_source"] = props.dealSource;
-    hsProps["hs_analytics_source"] = props.dealSource;
-  }
   // Strip undefined
   Object.keys(hsProps).forEach(k => hsProps[k] === undefined && delete hsProps[k]);
 
@@ -1589,16 +1606,6 @@ async function createSalesDeal(token, props, companyIds, contactId) {
   if (!r.ok) {
     const t = await r.text().catch(()=> "");
     console.error("sales deal create failed", r.status, t);
-    // Retry without optional fields if HubSpot rejected unknown property
-    if (r.status === 400 && t.includes("deal_source")) {
-      delete hsProps["deal_source"]; delete hsProps["hs_analytics_source"];
-      const r2 = await fetch("https://api.hubapi.com/crm/v3/objects/deals", { method:"POST", headers, body: JSON.stringify({ properties: hsProps }) });
-      if (!r2.ok) { console.error("sales deal retry failed", r2.status, await r2.text().catch(()=> "")); return null; }
-      const j2 = await r2.json().catch(()=> ({})); const id2 = j2.id ? String(j2.id) : null;
-      if (!id2) return null;
-      await associateSalesDeal(token, id2, companyIds, contactId);
-      return id2;
-    }
     return null;
   }
   const j = await r.json().catch(()=> ({}));
