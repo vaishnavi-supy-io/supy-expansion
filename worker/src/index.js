@@ -92,6 +92,29 @@ const HS = {
   retailerIdProp:     "retailer_id",
 };
 
+// Country → Slack mention. Override via env COUNTRY_MANAGERS_JSON = JSON string
+// e.g. {"United Arab Emirates":{"countryManager":"Jane Doe","slack":"<@U123>","accountManager":"John"},"Saudi Arabia":{...}}
+// If not set, a minimal demo map is used so the feature is visible in logs.
+const DEFAULT_COUNTRY_MANAGERS = {
+  "United Arab Emirates": { countryManager: "UAE Country Manager", slack: "", accountManager: "" },
+  "Saudi Arabia":         { countryManager: "KSA Country Manager", slack: "", accountManager: "" },
+  "Qatar":                { countryManager: "Qatar Country Manager", slack: "", accountManager: "" },
+  "Kuwait":               { countryManager: "Kuwait Country Manager", slack: "", accountManager: "" },
+  "Bahrain":              { countryManager: "Bahrain Country Manager", slack: "", accountManager: "" },
+  "Oman":                 { countryManager: "Oman Country Manager", slack: "", accountManager: "" },
+  "Egypt":                { countryManager: "Egypt Country Manager", slack: "", accountManager: "" },
+};
+function countryManagers(env) {
+  if (env.COUNTRY_MANAGERS_JSON) {
+    try { const j = JSON.parse(env.COUNTRY_MANAGERS_JSON); if (j && typeof j === "object") return j; } catch {}
+  }
+  return DEFAULT_COUNTRY_MANAGERS;
+}
+function managersForCountry(country, env) {
+  const map = countryManagers(env);
+  return map[country] || null;
+}
+
 // The catalogue the form offers. Ids are validated against this, so a
 // hand-rolled payload cannot invent a product that is not sold.
 const CATALOGUE = {
@@ -169,6 +192,9 @@ export default {
       }
       if (url.pathname === "/download" && request.method === "GET") {
         return await handleDownload(request, env);
+      }
+      if (url.pathname === "/retailers" && request.method === "GET") {
+        return await handleRetailers(request, env);
       }
       if (url.pathname === "/logs" && request.method === "GET") {
         return await handleLogs(request, env);
@@ -286,8 +312,74 @@ async function handleWebhook(request, env, ctx) {
     results.push("hubspot:auth-fail");
   }
 
-  // 8. Slack.
-  const slackOk = await sendSlack(env, payload, documents, contactId, submissionId);
+  // 7b. Existing Account → Onboarding deal lookup + Sales deal creation (new added process)
+  let salesDealId = null;
+  let onboardingDeal = null;
+  let onboardingCompanyIds = [];
+  if (token && contactId && str(payload.accountScope.target) === "Existing account") {
+    const retailerId = str(payload.accountScope.existingRetailerId) || "";
+    const retailerName = str(payload.accountScope.existingAccountName) || "";
+    const lookupId = retailerId || retailerName; // last resort: name as id
+    if (lookupId) {
+      try {
+        onboardingDeal = await findOnboardingDealByRetailerId(token, lookupId);
+        // If not found by id, try by name search via deals search with dealname contains?
+        if (!onboardingDeal && retailerName && retailerId !== retailerName) {
+          onboardingDeal = await findOnboardingDealByRetailerId(token, retailerName);
+        }
+        if (onboardingDeal) {
+          onboardingCompanyIds = await getDealCompanyIds(token, onboardingDeal.id);
+          // Also fetch companies via associations if none direct
+          if (!onboardingCompanyIds.length) {
+            // fallback via contact's companies
+            try {
+              const compAssoc = await fetch(`https://api.hubapi.com/crm/v3/objects/contacts/${contactId}/associations/companies`, { headers: { Authorization: `Bearer ${token}` } });
+              if (compAssoc.ok) {
+                const j = await compAssoc.json().catch(()=> ({}));
+                onboardingCompanyIds = (j.results || []).map(x => String(x.id));
+              }
+            } catch {}
+          }
+          const props = onboardingDeal.properties || {};
+          const dealStage = str(props.dealstage);
+          const accountOwnerId = str(props[HS.accountOwnerProp] || props.account_owner || "");
+          const dealOwnerId = str(props.hubspot_owner_id || "");
+          const salesOwnerId = (dealStage === HS.handoffStage && accountOwnerId) ? accountOwnerId : (dealOwnerId || accountOwnerId || "");
+          const countryForDeal = hsCountry(payload.requester.country) || str(payload.requester.country) || "";
+          const dealName = `${str(payload.requester.account) || "Account"} — Expansion: ${buildSubject(payload).slice(0, 80)}`;
+          salesDealId = await createSalesDeal(token, {
+            dealname: dealName,
+            pipeline: HS.salesPipeline,
+            dealstage: HS.proposalSentStage,
+            hubspot_owner_id: salesOwnerId || undefined,
+            amount: 0,
+            deal_currency_code: "USD",
+            dealtype: "existingbusiness",
+            country: countryForDeal || undefined,
+            retailerId: retailerId || retailerName || undefined,
+            dealSource: "Live / Existing Customer",
+          }, onboardingCompanyIds, contactId);
+          if (salesDealId) {
+            results.push(`salesDeal:created:${salesDealId}`);
+          } else {
+            results.push("salesDeal:fail");
+          }
+        } else {
+          results.push("salesDeal:skipped:no-onboarding-match");
+          console.error("No onboarding deal found for retailer", lookupId);
+        }
+      } catch (e) {
+        console.error("sales deal flow failed", String(e));
+        results.push("salesDeal:error");
+      }
+    } else {
+      results.push("salesDeal:skipped:no-retailer-id");
+    }
+  }
+
+  // 8. Slack. Includes country manager + account manager, and onboarding/sales context.
+  const slackCtx = { onboardingDeal, salesDealId, onboardingCompanyIds };
+  const slackOk = await sendSlack(env, payload, documents, contactId, submissionId, slackCtx);
   results.push(slackOk ? "slack:ok" : "slack:fail");
 
   // 9. Email. The client receipt is gated on HubSpot having recognised the
@@ -484,6 +576,9 @@ function normalise(p) {
   p.lines = [...p.products, ...p.features];
   p.billing.entities = Array.isArray(p.billing.entities) ? p.billing.entities : [];
   p.documents = Array.isArray(p.documents) ? p.documents : [];
+  // Retailer ID is optional in payload but normalized for downstream
+  if (p.accountScope.existingRetailerId !== undefined) p.accountScope.existingRetailerId = str(p.accountScope.existingRetailerId) || null;
+  else p.accountScope.existingRetailerId = null;
 }
 
 // Units ordered of one catalogue id, across every entity it is split over.
@@ -911,7 +1006,7 @@ function buildNote(p, documents, receivedAt, submissionId) {
 
     `<h4 style='${H4}'>ACCOUNT SCOPE</h4>`,
     `Sits under: <b>${esc(scope.target || "—")}</b><br>` +
-    `Existing account: ${esc(scope.existingAccountName || "—")}<br>` +
+    `Existing account: ${esc(scope.existingAccountName || "—")}${scope.existingRetailerId ? ` <span style='color:#888'>(Retailer ID: ${esc(scope.existingRetailerId)})</span>` : ""}<br>` +
     `New account name: ${esc(scope.newAccountName || "—")}<br>` +
 
 
@@ -1071,7 +1166,7 @@ function clip(text, max = 2800) {
   return `${kept}\n_…and ${dropped} more — see the full request in HubSpot._`;
 }
 
-async function sendSlack(env, p, documents, contactId, submissionId) {
+async function sendSlack(env, p, documents, contactId, submissionId, ctx = {}) {
   if (!env.SLACK_WEBHOOK_URL) {
     console.error("SLACK_WEBHOOK_URL not configured");
     return false;
@@ -1081,6 +1176,11 @@ async function sendSlack(env, p, documents, contactId, submissionId) {
     ? `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-1/${contactId}`
     : "https://app.hubspot.com/contacts/";
 
+  // Country → manager routing (new added process)
+  const mgr = managersForCountry(str(p.requester.country), env);
+  const retailerLabel = p.accountScope.existingAccountName ? smk(p.accountScope.existingAccountName) : "—";
+  const retailerIdLabel = p.accountScope.existingRetailerId ? ` (ID: ${smk(p.accountScope.existingRetailerId)})` : "";
+
   const blocks = [
     { type: "header", text: { type: "plain_text", text: "🏗️ New Expansion Request", emoji: true } },
     {
@@ -1088,13 +1188,44 @@ async function sendSlack(env, p, documents, contactId, submissionId) {
       fields: [
         { type: "mrkdwn", text: `*Account:*\n${smk(p.requester.account)}` },
         { type: "mrkdwn", text: `*Contact:*\n${smk(p.requester.name)} (${smk(p.requester.email)})` },
-        { type: "mrkdwn", text: `*Sits under:*\n${smk(p.accountScope.target || "—")}${p.accountScope.existingAccountName ? `\n${smk(p.accountScope.existingAccountName)}` : ""}` },
-        { type: "mrkdwn", text: `*Country:*\n${smk(p.requester.country || "—")}` },
+        { type: "mrkdwn", text: `*Sits under:*\n${smk(p.accountScope.target || "—")}${p.accountScope.existingAccountName ? `\n${retailerLabel}${retailerIdLabel}` : ""}` },
+        { type: "mrkdwn", text: `*Country:*\n${smk(p.requester.country || "—")}${mgr ? `\n_${smk(mgr.countryManager || "")}${mgr.slack ? ` ${mgr.slack}` : ""}_` : ""}` },
         { type: "mrkdwn", text: `*Adding:*\n${p.lines.length} line item(s)` },
         { type: "mrkdwn", text: `*Billing:*\n${smk(p.billing.sameLegalEntity || "—")}` },
       ],
     },
   ];
+
+  if (mgr && (mgr.countryManager || mgr.accountManager || mgr.slack)) {
+    const mgrLine = [
+      mgr.countryManager ? `*Country Manager:* ${smk(mgr.countryManager)}${mgr.slack ? ` ${mgr.slack}` : ""}` : null,
+      mgr.accountManager ? `*Account Manager:* ${smk(mgr.accountManager)}` : null,
+    ].filter(Boolean).join("  •  ");
+    if (mgrLine) blocks.push({ type: "section", text: { type: "mrkdwn", text: `:busts_in_silhouette: ${mgrLine}` } });
+  }
+
+  // Onboarding → Sales mapping context
+  if (ctx.onboardingDeal) {
+    const od = ctx.onboardingDeal;
+    const odProps = od.properties || {};
+    const odId = od.id ? String(od.id) : "—";
+    const odStage = str(odProps.dealstage) || "—";
+    const odOwner = str(odProps.hubspot_owner_id) || "—";
+    const accOwner = str(odProps[HS.accountOwnerProp] || odProps.account_owner || "—");
+    const rid = str(odProps[HS.retailerIdProp] || p.accountScope.existingRetailerId || "—");
+    const pipeline = str(odProps.pipeline) || HS.onboardingPipeline;
+    const salesLink = ctx.salesDealId ? `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-3/${ctx.salesDealId}` : null;
+    blocks.push({ type: "section", text: { type: "mrkdwn", text:
+      `*Onboarding deal:* <https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-3/${odId}|${smk(odProps.dealname || odId)}>  •  Stage \`${smk(odStage)}\`  •  Pipeline \`${smk(pipeline)}\`\n` +
+      `*Retailer ID:* \`${smk(rid)}\`  •  *Deal Owner:* \`${smk(odOwner)}\`  •  *Account Owner:* \`${smk(accOwner)}\`` +
+      (salesLink ? `\n*New Sales deal (Supy 360):* <${salesLink}|${ctx.salesDealId}> — Proposal Sent, Existing Business, USD 0` : "\n_Sales deal creation pending — no deal created_")
+    }});
+    if (ctx.onboardingCompanyIds && ctx.onboardingCompanyIds.length) {
+      blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `Associated compan${ctx.onboardingCompanyIds.length === 1 ? "y" : "ies"}: ${ctx.onboardingCompanyIds.map(id => `<https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-2/${id}|${id}>`).join(", ")}` }] });
+    }
+  } else if (str(p.accountScope.target) === "Existing account" && p.accountScope.existingAccountName) {
+    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `:warning: No onboarding deal matched Retailer ID \`${smk(p.accountScope.existingRetailerId || p.accountScope.existingAccountName)}\` in pipeline ${HS.onboardingPipeline}` }] });
+  }
 
   if (p.lines.length) {
     const rows = p.lines.map(l => {
@@ -1287,6 +1418,185 @@ async function handleAccountPrefill(request, env) {
 const newDraftKey = () => crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "").slice(0, 8);
 const isDraftKey  = k => typeof k === "string" && /^[a-f0-9]{40}$/.test(k);
 
+// ─────────────────────────────────────────────────────────────
+// Retailers by email (Existing Account filtering)
+// ─────────────────────────────────────────────────────────────
+async function handleRetailers(request, env) {
+  const email = str(new URL(request.url).searchParams.get("email"));
+  if (!email || !isEmail(email)) return json({ error: "Valid email required" }, 400, request, env);
+
+  let retailers = [];
+
+  // 1. Dedicated sheet URL, e.g. an Apps Script that returns {retailers:[{name, retailerId}]}
+  const sheetUrls = [env.RETAILER_SHEET_URL, env.USER_ACCESS_SHEET_URL, env.GOOGLE_SCRIPT_URL].filter(Boolean);
+  for (const sheetUrl of sheetUrls) {
+    try {
+      const sep = sheetUrl.includes("?") ? "&" : "?";
+      const r = await fetch(`${sheetUrl}${sep}email=${encodeURIComponent(email)}`, { cache: "no-store" });
+      if (r.ok) {
+        const j = await r.json().catch(() => null);
+        // Apps Script returns {retailers:[...]} or {status:"ok", retailers:[...]}
+        const list = j && (Array.isArray(j.retailers) ? j.retailers : Array.isArray(j) ? j : []);
+        const mapped = list.map(x => ({
+          name: str(x.name || x.retailerName || x.retailer || x.account || ""),
+          retailerId: str(x.retailerId || x.retailer_id || x.id || x.retailerID || ""),
+        })).filter(x => x.name);
+        if (mapped.length) { retailers = mapped; break; }
+        // Also accept the sheet returning empty but not error — continue to next source
+        if (j && Array.isArray(j.retailers)) { retailers = mapped; break; }
+      }
+    } catch (e) { console.error("retailer sheet fetch failed", String(e)); }
+  }
+
+  // 2. HubSpot fallback: companies associated to the contact -> retailer names via deals/companies
+  if (!retailers.length) {
+    const token = await getHubspotToken(env).catch(() => null);
+    if (token) {
+      try { retailers = await retailersForEmailViaHubSpot(token, email); } catch (e) { console.error("hubspot retailer lookup failed", String(e)); }
+    }
+  }
+
+  // Always return an array; empty means frontend stays in free-text mode.
+  return json({ retailers }, 200, request, env);
+}
+
+async function retailersForEmailViaHubSpot(token, email) {
+  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  // Find contact by email
+  const search = await fetch("https://api.hubapi.com/crm/v3/objects/contacts/search", {
+    method: "POST", headers,
+    body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: "email", operator: "EQ", value: email }] }], properties: ["email"], limit: 1 }),
+  });
+  if (!search.ok) return [];
+  const found = (await search.json()).results || [];
+  if (!found.length) return [];
+  const contactId = found[0].id;
+
+  // Companies associated to contact
+  const assoc = await fetch(`https://api.hubapi.com/crm/v3/objects/contacts/${contactId}/associations/companies`, { headers });
+  if (!assoc.ok) return [];
+  const cids = ((await assoc.json()).results || []).map(x => x.id);
+  if (!cids.length) return [];
+
+  const out = [];
+  for (const cid of cids.slice(0, 20)) {
+    try {
+      const comp = await fetch(`https://api.hubapi.com/crm/v3/objects/companies/${cid}?properties=name`, { headers });
+      if (!comp.ok) continue;
+      const j = await comp.json();
+      const name = str(j.properties && j.properties.name);
+      if (!name) continue;
+      // Attempt to find retailer_id via associated onboarding deals
+      const dealsRes = await fetch(`https://api.hubapi.com/crm/v3/objects/companies/${cid}/associations/deals`, { headers });
+      let rid = "";
+      if (dealsRes.ok) {
+        const deals = ((await dealsRes.json()).results || []);
+        for (const d of deals.slice(0, 10)) {
+          const dr = await fetch(`https://api.hubapi.com/crm/v3/objects/deals/${d.id}?properties=${HS.retailerIdProp},pipeline`, { headers });
+          if (!dr.ok) continue;
+          const dj = await dr.json();
+          const p = dj.properties || {};
+          if (str(p.pipeline) === HS.onboardingPipeline && str(p[HS.retailerIdProp])) { rid = str(p[HS.retailerIdProp]); break; }
+        }
+      }
+      out.push({ name, retailerId: rid });
+    } catch {}
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Onboarding → Sales deal helpers
+// ─────────────────────────────────────────────────────────────
+async function findOnboardingDealByRetailerId(token, retailerId) {
+  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const body = {
+    filterGroups: [{ filters: [
+      { propertyName: HS.retailerIdProp, operator: "EQ", value: str(retailerId) },
+      { propertyName: "pipeline", operator: "EQ", value: HS.onboardingPipeline },
+    ]}],
+    properties: ["dealname","dealstage","pipeline", HS.retailerIdProp, "hubspot_owner_id", HS.accountOwnerProp, "amount", "deal_currency_code", "country", "dealtype"],
+    limit: 1,
+  };
+  const r = await fetch("https://api.hubapi.com/crm/v3/objects/deals/search", { method:"POST", headers, body: JSON.stringify(body) });
+  if (!r.ok) { console.error("onboarding deal search failed", r.status, await r.text().catch(()=> "")); return null; }
+  const j = await r.json().catch(()=> ({}));
+  const hit = (j.results || [])[0];
+  return hit || null;
+}
+
+async function getDealCompanyIds(token, dealId) {
+  const headers = { Authorization: `Bearer ${token}` };
+  const r = await fetch(`https://api.hubapi.com/crm/v3/objects/deals/${dealId}/associations/companies`, { headers });
+  if (!r.ok) return [];
+  const j = await r.json().catch(()=> ({}));
+  return (j.results || []).map(x => String(x.id));
+}
+
+async function createSalesDeal(token, props, companyIds, contactId) {
+  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  // HubSpot property internal names: hubspot_owner_id, dealname, pipeline, dealstage, amount, deal_currency_code, dealtype, country, retailer_id
+  // deal_source is often a custom property; we try both deal_source and hs_analytics_source_2 if present, but never fail the deal if unknown.
+  const hsProps = {
+    dealname: props.dealname,
+    pipeline: props.pipeline,
+    dealstage: props.dealstage,
+    hubspot_owner_id: props.hubspot_owner_id,
+    amount: String(props.amount || 0),
+    deal_currency_code: props.deal_currency_code || "USD",
+    dealtype: props.dealtype || "existingbusiness",
+    country: props.country || undefined,
+    [HS.retailerIdProp]: props.retailerId || undefined,
+  };
+  // Optional source property — try common names
+  if (props.dealSource) {
+    hsProps["deal_source"] = props.dealSource;
+    hsProps["hs_analytics_source"] = props.dealSource;
+  }
+  // Strip undefined
+  Object.keys(hsProps).forEach(k => hsProps[k] === undefined && delete hsProps[k]);
+
+  const r = await fetch("https://api.hubapi.com/crm/v3/objects/deals", {
+    method:"POST", headers, body: JSON.stringify({ properties: hsProps }),
+  });
+  if (!r.ok) {
+    const t = await r.text().catch(()=> "");
+    console.error("sales deal create failed", r.status, t);
+    // Retry without optional fields if HubSpot rejected unknown property
+    if (r.status === 400 && t.includes("deal_source")) {
+      delete hsProps["deal_source"]; delete hsProps["hs_analytics_source"];
+      const r2 = await fetch("https://api.hubapi.com/crm/v3/objects/deals", { method:"POST", headers, body: JSON.stringify({ properties: hsProps }) });
+      if (!r2.ok) { console.error("sales deal retry failed", r2.status, await r2.text().catch(()=> "")); return null; }
+      const j2 = await r2.json().catch(()=> ({})); const id2 = j2.id ? String(j2.id) : null;
+      if (!id2) return null;
+      await associateSalesDeal(token, id2, companyIds, contactId);
+      return id2;
+    }
+    return null;
+  }
+  const j = await r.json().catch(()=> ({}));
+  const dealId = j.id ? String(j.id) : null;
+  if (!dealId) return null;
+  await associateSalesDeal(token, dealId, companyIds, contactId);
+  return dealId;
+}
+
+async function associateSalesDeal(token, dealId, companyIds, contactId) {
+  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const assoc = (from, fromId, to, toId, type) =>
+    fetch(`https://api.hubapi.com/crm/v3/associations/${from}/${to}/batch/create`, {
+      method:"POST", headers, body: JSON.stringify({ inputs: [{ from:{id: fromId}, to:{id: toId}, type }] }),
+    }).catch(e => console.error("sales assoc failed", type, String(e)));
+  if (companyIds && companyIds.length) {
+    for (const cid of companyIds) {
+      await assoc("Deals", dealId, "Companies", cid, "deal_to_company");
+    }
+  }
+  if (contactId) {
+    await assoc("Deals", dealId, "Contacts", contactId, "deal_to_contact");
+  }
+}
+
 function formBaseUrl(env) {
   return (env.FORM_URL || "https://vaishnavi-supy-io.github.io/supy-expansion/").replace(/\?.*$/, "");
 }
@@ -1328,6 +1638,7 @@ async function logToSheets(env, p, documents, receivedAt, submissionId) {
         country:      p.requester.country || "",
         scope:        p.accountScope.target || "",
         existingAccount: p.accountScope.existingAccountName || "",
+        existingRetailerId: p.accountScope.existingRetailerId || "",
         newAccount:      p.accountScope.newAccountName || "",
         outletCount:      unitsOf(p, "outlet"),
         ckAddonCount:     unitsOf(p, "ck_addon"),
@@ -1452,6 +1763,8 @@ function handleDebug(request, env) {
     CLOUDINARY_API_KEY:    Boolean(env.CLOUDINARY_API_KEY),
     CLOUDINARY_API_SECRET: Boolean(env.CLOUDINARY_API_SECRET),
     FORM_SHARED_SECRET:    Boolean(env.FORM_SHARED_SECRET),
+    RETAILER_SHEET_URL:    Boolean(env.RETAILER_SHEET_URL || env.USER_ACCESS_SHEET_URL),
+    COUNTRY_MANAGERS_JSON: Boolean(env.COUNTRY_MANAGERS_JSON),
     ALLOWED_ORIGINS:       env.ALLOWED_ORIGINS || "(any)",
     PUBLIC_BASE_URL:       env.PUBLIC_BASE_URL || "(request origin)",
     LOGS_bound:            Boolean(env.LOGS),

@@ -20,7 +20,7 @@
 
 var REQUEST_HEADERS = [
   "Received", "Ref", "Account", "Contact", "Email", "Phone", "Country",
-  "Sits under", "Existing account", "New account",
+  "Sits under", "Existing account", "Retailer ID", "New account",
   "Outlets", "CK add-ons", "WH add-ons", "Cost centers", "Features",
   "Same legal entity", "Billing entities", "Documents", "Notes", "Summary"
 ];
@@ -58,7 +58,7 @@ function doPost(e) {
     requests.appendRow([
       d.receivedAt || "", d.submissionId, d.account || "", d.contactName || "",
       d.contactEmail || "", d.contactPhone || "", d.country || "",
-      d.scope || "", d.existingAccount || "", d.newAccount || "",
+      d.scope || "", d.existingAccount || "", d.existingRetailerId || "", d.newAccount || "",
       d.outletCount || 0, d.ckAddonCount || 0, d.whAddonCount || 0,
       d.costCenterCount || 0, d.featureCount || 0,
       d.sameLegalEntity || "", entities, docs, d.notes || "", d.summary || ""
@@ -77,7 +77,47 @@ function doPost(e) {
   }
 }
 
-function doGet() {
+var ACCESS_SPREADSHEET_ID = "1raBGqWqxVaUcraY0gjR-CFQT3T2_TheemPfOpihmmFE";
+var ACCESS_SHEET_GID = 599203487;
+
+function doGet(e) {
+  try {
+    var email = e && e.parameter && e.parameter.email;
+    if (email) {
+      var ss = null;
+      try { ss = SpreadsheetApp.openById(ACCESS_SPREADSHEET_ID); } catch (err) { ss = SpreadsheetApp.getActiveSpreadsheet(); }
+      var sh = null;
+      // Prefer the gid the user linked, then name fallback
+      if (ACCESS_SHEET_GID) {
+        try { sh = ss.getSheets().filter(function(s){ return s.getSheetId() === ACCESS_SHEET_GID; })[0] || null; } catch (err) {}
+      }
+      if (!sh) sh = ss.getSheetByName("Access");
+      if (!sh) sh = ss.getSheets()[0];
+      if (!sh) return reply({ retailers: [] });
+      var data = sh.getDataRange().getValues();
+      var headers = data[0].map(function(h){ return String(h).trim().toLowerCase(); });
+      var emailIdx = headers.indexOf("email");
+      var nameIdx = headers.indexOf("retailer name");
+      if (nameIdx === -1) nameIdx = headers.indexOf("retailer");
+      if (nameIdx === -1) nameIdx = headers.indexOf("account");
+      var idIdx = headers.indexOf("retailer id");
+      if (idIdx === -1) idIdx = headers.indexOf("retailer_id");
+      if (emailIdx === -1 || nameIdx === -1) return reply({ retailers: [] });
+      var want = String(email).trim().toLowerCase();
+      var out = [];
+      for (var i=1;i<data.length;i++){
+        var rowEmail = String(data[i][emailIdx] || "").trim().toLowerCase();
+        if (rowEmail !== want) continue;
+        var name = String(data[i][nameIdx] || "").trim();
+        if (!name) continue;
+        var rid = idIdx >=0 ? String(data[i][idIdx] || "").trim() : "";
+        out.push({ name: name, retailerId: rid });
+      }
+      return reply({ retailers: out });
+    }
+  } catch (err) {
+    return reply({ retailers: [], error: String(err) });
+  }
   return reply({ status: "ok", service: "supy-expansion sheets receiver" });
 }
 

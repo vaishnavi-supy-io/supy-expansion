@@ -295,12 +295,6 @@ input[readonly],input:disabled,textarea:disabled{background:var(--readonly);bord
 .xbtn svg{width:13px;height:13px;stroke:currentColor;stroke-width:2.4;fill:none}
 .side-foot{padding:16px 18px;border-top:1px solid var(--divider);background:#fbfbfd}
 .side-foot .btn.pri{width:100%;padding:12px}
-.draftnote{font-size:11px;margin-top:9px;line-height:1.5;color:var(--gray)}
-.draftnote.ok{color:var(--ok-text)}
-.draftnote.bad{color:var(--err-text)}
-.linkbox{display:flex;gap:6px;margin-top:9px}
-.linkbox input{font-size:11px;padding:7px 9px;font-family:'SF Mono','Fira Code',monospace}
-.linkbox .btn{padding:7px 11px;font-size:11px;flex:none}
 .side-foot .dest{font-size:11px;color:var(--gray);margin-top:11px;line-height:1.7}
 .side-foot .dest b{color:var(--text);font-weight:600}
 .addbar{display:flex;gap:10px;align-items:center;margin-top:4px}
@@ -438,8 +432,12 @@ input[readonly],input:disabled,textarea:disabled{background:var(--readonly);bord
           </div>
           <div class="field" id="f_existacct" hidden>
             <label class="lbl" for="existacct">Your existing retailer / account name <span class="req">*</span></label>
-            <input type="text" id="existacct" placeholder="Enter your account name in Supy">
-            <div class="hint">Exactly as it appears in Supy, so we attach this request to the right account.</div>
+            <div class="selwrap" id="existacctSelWrap">
+              <select id="existacct"><option value="">Select retailer</option></select>
+              <span class="chev"><svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></span>
+            </div>
+            <input type="text" id="existacctFallback" hidden placeholder="Enter your account name in Supy">
+            <div class="hint" id="existacctHint">Exactly as it appears in Supy, so we attach this request to the right account.</div>
             <div class="err-msg">Tell us which existing account this belongs to</div>
           </div>
           <div class="field" id="f_newacct" hidden>
@@ -607,12 +605,6 @@ input[readonly],input:disabled,textarea:disabled{background:var(--readonly);bord
         </div>
         <div class="side-foot">
           <button class="btn pri" type="button" id="submitBtn">Submit request</button>
-          <button class="btn sec" type="button" id="saveBtn" style="width:100%;margin-top:8px">Save and get a link</button>
-          <div class="draftnote" id="draftNote" hidden></div>
-          <div class="linkbox" id="linkBox" hidden>
-            <input type="text" id="draftUrl" readonly aria-label="Link to resume this request">
-            <button class="btn sec" type="button" id="copyLinkBtn">Copy</button>
-          </div>
           <div class="dest">Check your list above before submitting. You can add or remove items at any point.</div>
         </div>
       </div>
@@ -649,9 +641,11 @@ const CONFIG = {
   // Leave null to run in preview mode: the form validates and shows the exact
   // JSON payload instead of posting it anywhere.
   webhookUrl: 'https://supy-expansion.vaishnavi-5d1.workers.dev/webhook',
-  // Ships to the browser, so it deters bots and nothing more. Leave null unless
-  // the Worker has FORM_SHARED_SECRET set.
   webhookSecret: null,
+  // Optional override via ?api= for local dev. Only localhost is allowed.
+  apiOverride: (() => {
+    try { const u = new URL(location.href).searchParams.get('api'); return u && /^https?:\/\/localhost(?::\d+)?\//i.test(u) ? u : null; } catch { return null; }
+  })(),
 
   // 'multipart' turns the request into multipart/form-data (a "payload" field
   // with the JSON, plus the files). 'base64' embeds files in the JSON instead,
@@ -667,10 +661,8 @@ const CONFIG = {
   geoEndpoint: null,
 
   maxFileMB: 10,
-  // Per entity, not per request: Saudi Arabia requires three documents for each
-  // entity, so a flat cap of 8 made a three-entity request impossible to submit.
-  maxFilesPerEntity: 6,
   maxFiles: 30,
+  maxFilesPerEntity: 6,
   maxTotalMB: 25,
   allowedExt: ['pdf','jpg','jpeg','png','doc','docx','xls','xlsx'],
 
@@ -703,9 +695,12 @@ const state = {
   selected: new Set(),      // catalogue ids that are switched on
   alloc: {},                // id -> [{ id, entity, qty }]
   entities: [], eSeq:0, aSeq:0,
-  pendingTarget:null, pendingEntityId:null
+  pendingTarget:null, pendingEntityId:null,
+  retailers: [],            // [{ name, retailerId }]
+  retailerId: ''            // selected retailerId
 };
 
+let submissionNonce = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID().replace(/-/g,'') : String(Date.now()) + Math.random().toString(36).slice(2,10);
 const $  = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
@@ -874,7 +869,7 @@ function renderEntities(){
         if (state.pendingEntityId === e.id && state.pendingTarget){
           const t = state.pendingTarget;
           const line = allocLines(t.id).find(l => l.id === t.lineId);
-          if (line) line.entity = String(e.id);
+          if (line) line.entity = e.name.trim();
         }
         refreshBillsOptions();
         renderAllAlloc();
@@ -929,6 +924,72 @@ function syncKsaBlocks(){
   }
 }
 
+/* ---------- retailer access (Existing Account) ---------- */
+function apiBase(){
+  const url = CONFIG.apiOverride || CONFIG.webhookUrl || '';
+  return url ? url.replace(/\/webhook\/?$/, '') : '';
+}
+function renderRetailerOptions(){
+  const sel = $('existacct');
+  const wrap = $('existacctSelWrap');
+  const fb = $('existacctFallback');
+  const hint = $('existacctHint');
+  if (!sel) return;
+  const list = state.retailers;
+  if (!list.length){
+    // No filtered list — fall back to free text so user is not blocked.
+    if (wrap) wrap.hidden = true;
+    if (fb) { fb.hidden = false; fb.value = sel.value || fb.value; }
+    if (hint) hint.textContent = 'Enter your account name in Supy, so we attach this request to the right account.';
+    state.retailerId = fb ? fb.dataset.retailerId || '' : '';
+    return;
+  }
+  if (wrap) wrap.hidden = false;
+  if (fb) fb.hidden = true;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Select retailer</option>' +
+    list.map(r => `<option value="${esc(r.name)}" data-rid="${esc(r.retailerId || '')}"${r.name===cur?' selected':''}>${esc(r.name)}${r.retailerId?' — '+esc(r.retailerId):''}</option>`).join('');
+  const opt = sel.selectedOptions[0];
+  state.retailerId = opt ? (opt.dataset.rid || '') : '';
+  if (hint) hint.textContent = list.length + ' retailer(s) available for this email. Select the one this expansion is for.';
+}
+async function fetchRetailers(){
+  const email = $('email') ? $('email').value.trim() : '';
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)){
+    state.retailers = [];
+    renderRetailerOptions();
+    return;
+  }
+  const base = apiBase();
+  if (!base){
+    // Preview mode — no backend to ask, keep free text.
+    state.retailers = [];
+    renderRetailerOptions();
+    return;
+  }
+  const hint = $('existacctHint');
+  if (hint) hint.textContent = 'Checking which retailers this email can access…';
+  try {
+    const res = await fetch(base + '/retailers?email=' + encodeURIComponent(email), { cache:'no-store' });
+    if (!res.ok) throw new Error('' + res.status);
+    const j = await res.json();
+    const list = Array.isArray(j.retailers) ? j.retailers : Array.isArray(j) ? j : [];
+    state.retailers = list.map(r => ({
+      name: String(r.name || r.retailerName || r.retailer || '').trim(),
+      retailerId: String(r.retailerId || r.retailer_id || r.id || '').trim()
+    })).filter(r => r.name);
+    renderRetailerOptions();
+  } catch {
+    state.retailers = [];
+    renderRetailerOptions();
+    if (hint) hint.textContent = 'Could not load retailers for this email — you can still type the retailer name.';
+    const fb = $('existacctFallback');
+    const selWrap = $('existacctSelWrap');
+    if (selWrap) selWrap.hidden = true;
+    if (fb) fb.hidden = false;
+  }
+}
+
 function addEntityFor(target){
   const e = blankEntity();
   state.entities.push(e);
@@ -951,10 +1012,14 @@ function addEntity(){
 }
 
 function removeEntity(id){
+  const gone = entityById(id);
+  const name = gone ? gone.name.trim() : '';
   state.entities = state.entities.filter(e => e.id !== id);
-  Object.values(state.alloc).forEach(lines => lines.forEach(l => {
-    if (String(l.entity) === String(id)) l.entity = '';
-  }));
+  if (name){
+    Object.values(state.alloc).forEach(lines => lines.forEach(l => {
+      if (l.entity === name) l.entity = '';
+    }));
+  }
   entError('');
   renderEntities();
 }
@@ -974,9 +1039,7 @@ function addFiles(entityId, kind, fileList){
   let total = allFiles().reduce((s, f) => s + f.size, 0);
 
   for (const f of fileList){
-    if (perEntity >= CONFIG.maxFilesPerEntity){
-      rejected.push('only ' + CONFIG.maxFilesPerEntity + ' files per billing entity'); break;
-    }
+    if (perEntity >= CONFIG.maxFilesPerEntity){ rejected.push('only ' + CONFIG.maxFilesPerEntity + ' files per billing entity'); break; }
     if (count >= CONFIG.maxFiles){ rejected.push('only ' + CONFIG.maxFiles + ' files in total'); break; }
     if (!CONFIG.allowedExt.includes(extOf(f.name))){ rejected.push(f.name + ' is not a supported file type'); continue; }
     if (f.size > CONFIG.maxFileMB * MB){ rejected.push(f.name + ' is over ' + CONFIG.maxFileMB + ' MB'); continue; }
@@ -1025,28 +1088,17 @@ function renderFiles(entityId, kind){
    the account entity. As soon as one exists the choice is real, so each line
    starts blank and has to be answered.
    ============================================================ */
-// Lines hold an entity id, never a name, so correcting a typo in an entity name
-// relabels its option instead of orphaning every line pointing at it.
-const DEFAULT_ID = 'default';
-const namedEntities = () => state.entities.filter(e => e.name.trim());
-const entityLabel = ref => {
-  if (ref === DEFAULT_ID) return DEFAULT_ENTITY;
-  const e = state.entities.find(x => String(x.id) === String(ref));
-  return e && e.name.trim() ? e.name.trim() : '';
-};
-
 function billsOptionsHTML(current){
-  const ents = namedEntities();
-  if (!ents.length) return `<option value="">${DEFAULT_ENTITY}</option>`;
-  const sel = v => String(current) === String(v) ? ' selected' : '';
+  const names = entityNames();
+  if (!names.length) return `<option value="">${DEFAULT_ENTITY}</option>`;
   return [`<option value=""${current ? '' : ' selected'}>Select entity</option>`,
-          `<option value="${DEFAULT_ID}"${sel(DEFAULT_ID)}>${DEFAULT_ENTITY}</option>`]
-    .concat(ents.map(e => `<option value="${e.id}"${sel(e.id)}>${esc(e.name.trim())}</option>`))
+          `<option${current === DEFAULT_ENTITY ? ' selected' : ''}>${DEFAULT_ENTITY}</option>`]
+    .concat(names.map(n => `<option${current === n ? ' selected' : ''}>${esc(n)}</option>`))
     .concat($('docsCard').hidden ? [] : [`<option value="${ADD_ENTITY}">+ Add a billing entity</option>`])
     .join('');
 }
 
-const billsRequired = () => namedEntities().length > 0;
+const billsRequired = () => entityNames().length > 0;
 
 function refreshBillsOptions(){
   const on = billsRequired();
@@ -1180,7 +1232,7 @@ function renderSummary(){
       const lines = allocLines(s.id);
       const detail = lines
         .filter(l => l.entity || lines.length > 1)
-        .map(l => `${Number(l.qty) || 0} \u00d7 ${esc(entityLabel(l.entity) || DEFAULT_ENTITY)}`)
+        .map(l => `${Number(l.qty) || 0} \u00d7 ${esc(l.entity || DEFAULT_ENTITY)}`)
         .join('\n');
       rows.push(`<tr class="rowin">
         <td><div class="nm">${esc(s.name)}</div>${detail ? `<div class="sub">${detail}</div>` : ''}</td>
@@ -1210,131 +1262,6 @@ function renderSummary(){
 }
 
 /* ============================================================
-   DRAFTS
-   Autosaves so a closed tab does not cost the whole request, and hands back a
-   link that reopens it. Uploaded documents are the one thing a draft cannot
-   carry: file contents never leave the browser until submit, and storing
-   customer paperwork against a key that is itself the only credential is a
-   worse trade than asking for the files again.
-   ============================================================ */
-const DRAFT_BASE = CONFIG.webhookUrl ? CONFIG.webhookUrl.replace(/\/webhook$/, '') : null;
-let draftKey = null, draftTimer = null, draftBusy = false, restoring = false;
-
-function draftNote(msg, kind){
-  const el = $('draftNote');
-  el.textContent = msg || '';
-  el.hidden = !msg;
-  el.className = 'draftnote' + (kind ? ' ' + kind : '');
-}
-
-function serializeState(){
-  return {
-    _draft_key: draftKey,
-    fields: {
-      company:$('company').value, country:$('country').value, phone:$('phone').value,
-      contact:$('contact').value, email:$('email').value, notes:$('notes').value,
-      existacct:$('existacct').value, newacct:$('newacct').value,
-      scope: (document.querySelector('input[name=scope]:checked')||{}).value || '',
-      entity:(document.querySelector('input[name=entity]:checked')||{}).value || ''
-    },
-    selected: [...state.selected],
-    alloc: state.alloc,
-    // File objects cannot be serialised; only the typed details survive.
-    entities: state.entities.map(e => ({ id:e.id, name:e.name, regNumber:e.regNumber, trn:e.trn })),
-    eSeq: state.eSeq, aSeq: state.aSeq
-  };
-}
-
-function restoreState(d){
-  if (!d || !d.fields) return;
-  restoring = true;
-  const f = d.fields;
-
-  ['company','country','phone','contact','email','notes','existacct','newacct'].forEach(id => {
-    if (typeof f[id] === 'string') $(id).value = f[id];
-  });
-  $('h1dyn').innerHTML = f.company ? ' - <span class="dyn">' + esc(f.company) + '</span>' : '';
-
-  const scopeRadio = f.scope && document.querySelector(`input[name=scope][value="${CSS.escape(f.scope)}"]`);
-  if (scopeRadio){
-    scopeRadio.checked = true;
-    $('f_existacct').hidden = f.scope !== 'Existing account';
-    $('f_newacct').hidden   = f.scope !== 'New account';
-  }
-
-  state.eSeq = Number(d.eSeq) || 0;
-  state.aSeq = Number(d.aSeq) || 0;
-  state.entities = (Array.isArray(d.entities) ? d.entities : []).map(e => ({
-    id:e.id, name:e.name || '', regNumber:e.regNumber || '', trn:e.trn || '',
-    docs:{ registration:[], vat:[], address:[] }
-  }));
-
-  state.alloc = d.alloc && typeof d.alloc === 'object' ? d.alloc : {};
-  state.selected = new Set(Array.isArray(d.selected) ? d.selected : []);
-  document.querySelectorAll('.tog[data-item]').forEach(t =>
-    t.setAttribute('aria-checked', String(state.selected.has(t.dataset.item))));
-
-  const entRadio = f.entity && document.querySelector(`input[name=entity][value="${CSS.escape(f.entity)}"]`);
-  if (entRadio){
-    entRadio.checked = true;
-    $('docsCard').hidden = f.entity === 'Same legal entity';
-  }
-
-  renderEntities();
-  syncKsaBlocks();
-  renderAllAlloc();
-  refreshBillsOptions();
-  renderSummary();
-  restoring = false;
-  draftNote(state.entities.length
-    ? 'Draft restored. Any documents you attached before need adding again.'
-    : 'Draft restored.', 'ok');
-}
-
-async function saveDraft(silent){
-  if (!DRAFT_BASE || draftBusy) return;
-  draftBusy = true;
-  if (!silent) draftNote('Saving...');
-  try {
-    const res = await fetch(DRAFT_BASE + '/draft/save', {
-      method:'POST', headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify(serializeState())
-    });
-    if (!res.ok) throw new Error('Save failed (' + res.status + ')');
-    const out = await res.json();
-    draftKey = out.key;
-    if (silent){
-      draftNote('Draft saved automatically.', 'ok');
-    } else {
-      $('draftUrl').value = out.draft_url;
-      $('linkBox').hidden = false;
-      draftNote('Saved. This link reopens your request for ' + out.expiresInDays + ' days.', 'ok');
-    }
-  } catch (err){
-    // Autosave failing quietly is fine; an explicit save is not, because
-    // someone is waiting on a link.
-    if (silent) draftNote(''); else draftNote(err.message + '. Your answers are still here.', 'bad');
-  } finally { draftBusy = false; }
-}
-
-function queueAutosave(){
-  if (!DRAFT_BASE || restoring) return;
-  clearTimeout(draftTimer);
-  draftTimer = setTimeout(() => saveDraft(true), 2000);
-}
-
-async function loadDraft(key){
-  if (!DRAFT_BASE) return;
-  draftNote('Loading your saved request...');
-  try {
-    const res = await fetch(DRAFT_BASE + '/draft/load?key=' + encodeURIComponent(key));
-    if (!res.ok) throw new Error(res.status === 404 ? 'That link has expired or does not exist.' : 'Could not load (' + res.status + ')');
-    draftKey = key;
-    restoreState((await res.json()).data);
-  } catch (err){ draftNote(err.message + ' Start a new request below.', 'bad'); }
-}
-
-/* ============================================================
    VALIDATION
    ============================================================ */
 const setErr   = id => $(id).classList.add('bad');
@@ -1348,6 +1275,22 @@ function scrollToFirstProblem(){
   if (typeof first.scrollIntoView === 'function') first.scrollIntoView({ behavior:'smooth', block:'center' });
   const focusable = first.querySelector('input:not([disabled]), select:not([disabled]), textarea:not([disabled])');
   if (focusable) setTimeout(() => focusable.focus({ preventScroll:true }), 320);
+}
+
+function getExistingAccountName(){
+  const sel = $('existacct');
+  const fb  = $('existacctFallback');
+  if (sel && !sel.closest('#existacctSelWrap')?.hidden && sel.value.trim()) return sel.value.trim();
+  if (fb && !fb.hidden && fb.value.trim()) return fb.value.trim();
+  // Fallback: whichever has value
+  if (sel && sel.value.trim()) return sel.value.trim();
+  if (fb && fb.value.trim()) return fb.value.trim();
+  return '';
+}
+function getExistingRetailerId(){
+  const sel = $('existacct');
+  if (sel && sel.selectedOptions[0]) return sel.selectedOptions[0].dataset.rid || state.retailerId || '';
+  return state.retailerId || '';
 }
 
 function validate(){
@@ -1367,7 +1310,7 @@ function validate(){
   if (scope && scope.value === 'New account' && !$('newacct').value.trim()){
     setErr('f_newacct'); problems.push('the new account name');
   }
-  if (scope && scope.value === 'Existing account' && !$('existacct').value.trim()){
+  if (scope && scope.value === 'Existing account' && !getExistingAccountName()){
     setErr('f_existacct'); problems.push('your existing account name');
   }
 
@@ -1440,7 +1383,7 @@ function lineItems(list){
     name: s.name,
     totalQuantity: allocTotal(s.id),
     allocations: allocLines(s.id).map(l => ({
-      billsUnder: entityLabel(l.entity) || DEFAULT_ENTITY,
+      billsUnder: l.entity || DEFAULT_ENTITY,
       quantity: Number(l.qty) || 0
     }))
   }));
@@ -1453,16 +1396,6 @@ function buildSubject(){
          ' (' + (bits.join(', ') || 'no items') + ')';
 }
 
-// One nonce per attempt, rotated only once a submission has landed, so every
-// retry of the same attempt carries the same value and the Worker recognises
-// the replay instead of creating a second deal.
-let submissionNonce = newNonce();
-function newNonce(){
-  return (crypto && crypto.randomUUID)
-    ? crypto.randomUUID().replace(/-/g, '')
-    : String(Date.now()) + Math.random().toString(36).slice(2, 12);
-}
-
 function buildPayload(){
   const entity = document.querySelector('input[name=entity]:checked');
   const scope  = document.querySelector('input[name=scope]:checked');
@@ -1472,7 +1405,8 @@ function buildPayload(){
     submissionNonce,
     accountScope: {
       target:              scope ? scope.value : null,
-      existingAccountName: $('existacct').value.trim() || null,
+      existingAccountName: getExistingAccountName() || null,
+      existingRetailerId:  getExistingRetailerId() || null,
       newAccountName:      $('newacct').value.trim() || null
     },
     requester: {
@@ -1523,7 +1457,8 @@ async function submitRequest(){
   const payload = buildPayload();
 
   try {
-    if (CONFIG.webhookUrl){
+    const effectiveUrl = CONFIG.apiOverride || CONFIG.webhookUrl;
+    if (effectiveUrl){
       const headers = {};
       if (CONFIG.webhookSecret) headers['X-Supy-Signature'] = CONFIG.webhookSecret;
       let body;
@@ -1551,9 +1486,9 @@ async function submitRequest(){
         body = JSON.stringify(payload);
       }
 
-      const res = await fetch(CONFIG.webhookUrl, { method:'POST', headers, body });
+      const res = await fetch(effectiveUrl, { method:'POST', headers, body });
       if (!res.ok) throw new Error('Endpoint returned ' + res.status);
-      submissionNonce = newNonce();      // this attempt is done; the next is new
+      submissionNonce = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID().replace(/-/g,'') : String(Date.now()) + Math.random().toString(36).slice(2,10);
       showDone(payload, false);
     } else {
       showDone(payload, true);
@@ -1586,20 +1521,21 @@ function resetAll(){
   state.selected.clear(); state.alloc = {}; state.aSeq = 0;
   state.entities = []; state.eSeq = 0;
   state.pendingTarget = null; state.pendingEntityId = null;
+  state.retailers = []; state.retailerId = '';
+  submissionNonce = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID().replace(/-/g,'') : String(Date.now()) + Math.random().toString(36).slice(2,10);
 
   document.querySelectorAll('input[type=text],input[type=email],input[type=tel],textarea').forEach(i => i.value = '');
   document.querySelectorAll('select').forEach(s => s.value = '');
   document.querySelectorAll('input[name=entity],input[name=scope]').forEach(r => r.checked = false);
   document.querySelectorAll('.field').forEach(f => f.classList.remove('bad'));
   document.querySelectorAll('.tog[data-item]').forEach(t => t.setAttribute('aria-checked','false'));
-  submissionNonce = newNonce();
-  draftKey = null; draftNote(''); $('linkBox').hidden = true;
 
   $('f_newacct').hidden = true;
   $('f_existacct').hidden = true;
   $('docsCard').hidden = true;
   $('h1dyn').textContent = '';
   hideTop(); entError('');
+  renderRetailerOptions();
   renderEntities(); renderAllAlloc(); refreshBillsOptions(); renderSummary();
   syncKsaBlocks(); detectCountry();
 
@@ -1616,6 +1552,7 @@ document.querySelectorAll('input[name=scope]').forEach(r => {
     $('f_newacct').hidden   = r.value !== 'New account';
     $('f_existacct').hidden = r.value !== 'Existing account';
     clearErr('f_scope');
+    if (r.value === 'Existing account' && r.checked) fetchRetailers();
   });
 });
 
@@ -1652,6 +1589,16 @@ $('country').innerHTML = ['<option value="">Select country</option>']
   .concat(COUNTRIES.map(c => `<option>${esc(c)}</option>`)).join('');
 $('country').addEventListener('change', () => { clearErr('f_country'); syncKsaBlocks(); });
 
+$('email').addEventListener('blur', fetchRetailers);
+$('email').addEventListener('change', fetchRetailers);
+$('existacct').addEventListener('change', () => {
+  const opt = $('existacct').selectedOptions[0];
+  state.retailerId = opt ? (opt.dataset.rid || '') : '';
+  $('f_existacct').classList.remove('bad');
+});
+const fb = $('existacctFallback');
+if (fb) fb.addEventListener('input', () => { $('f_existacct').classList.remove('bad'); state.retailerId = ''; });
+
 $('addEntBtn').addEventListener('click', addEntity);
 $('submitBtn').addEventListener('click', submitRequest);
 $('againBtn').addEventListener('click', resetAll);
@@ -1663,33 +1610,12 @@ $('copyBtn').addEventListener('click', async () => {
   } catch { $('copyBtn').textContent = 'Select the text above to copy'; }
 });
 
-$('saveBtn').addEventListener('click', () => saveDraft(false));
-$('copyLinkBtn').addEventListener('click', async () => {
-  const b = $('copyLinkBtn');
-  try {
-    await navigator.clipboard.writeText($('draftUrl').value);
-    b.textContent = 'Copied';
-    setTimeout(() => b.textContent = 'Copy', 1600);
-  } catch { $('draftUrl').select(); b.textContent = 'Select'; }
-});
-
-// Covers typing plus the toggles and remove buttons, which emit no input event.
-document.addEventListener('input',  queueAutosave);
-document.addEventListener('change', queueAutosave);
-document.addEventListener('click', e => { if (e.target.closest('.tog, .xbtn')) queueAutosave(); });
-
 buildCatalogue(CONFIG.products, 'prodBody');
 buildCatalogue(CONFIG.services, 'svcBody');
 renderEntities();
 refreshBillsOptions();
 renderSummary();
 detectCountry();
-
-// A ?draft= link reopens a saved request rather than starting a blank one.
-(function resumeFromLink(){
-  const key = new URLSearchParams(location.search).get('draft');
-  if (key) loadDraft(key);
-})();
 
 </script>
 </body>
