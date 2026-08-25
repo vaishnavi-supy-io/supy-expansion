@@ -48,7 +48,7 @@ const HUBSPOT_PORTAL_ID = "9423176";
 // HubSpot's API origin. Overridable only so the CRM calls can be pointed at a
 // local stub in tests; unset in every real environment. It carries the token,
 // so nothing but a trusted env var may ever set it.
-let HUBSPOT_API = `${HUBSPOT_API}`;
+let HUBSPOT_API = "https://api.hubapi.com";
 
 // Mirrors CONFIG in the form. Enforced again here because client-side limits
 // are a courtesy to the user, not a control.
