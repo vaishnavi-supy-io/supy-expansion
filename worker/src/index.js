@@ -1234,7 +1234,6 @@ function esc(s) {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
-const H4 = "color:#503390;border-bottom:1px solid #e0d8f0;padding-bottom:4px;margin:14px 0 8px";
 // One type stack and one set of cell metrics for every table in the note, so
 // the sections line up with each other instead of each looking hand-made.
 const FONT  = "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif";
@@ -1270,80 +1269,95 @@ function kv(pairs) {
 function buildNote(p, documents, receivedAt, submissionId, bundle) {
   const r     = p.requester;
   const scope = p.accountScope;
+  const dash  = "&mdash;";
 
   const lineRows = p.lines.map(l => {
     const allocs = Array.isArray(l.allocations) ? l.allocations : [];
     const qty = allocs.reduce((n, a) => n + (Number(a.quantity) || 0), 0);
+    const split = allocs.length
+      ? allocs.map(a => `${esc(a.quantity)} &times; ${esc(a.billsUnder || DEFAULT_ENTITY)}`).join("<br>")
+      : dash;
     return [
-      `<b>${esc(CATALOGUE[str(l.id)] || l.name || l.id)}</b>`,
-      esc(qty),
-      allocs.map(a => `${esc(a.quantity)} &times; ${esc(a.billsUnder || DEFAULT_ENTITY)}`).join("<br>") || "—",
+      esc(CATALOGUE[str(l.id)] || l.name || l.id),
+      `<b>${esc(qty)}</b>`,
+      split,
     ];
   });
 
   const entityRows = p.billing.entities.map(e => [
     `<b>${esc(e.name)}</b>`,
-    esc(e.registrationNumber || "—"),
-    esc(e.trn || "—"),
-    (e.documentLinks || []).length
-      ? e.documentLinks.map(d => d.url
-          ? `<a href='${esc(d.url)}' style='color:#503390;font-weight:600;text-decoration:none'>⬇ ${esc(DOC_LABELS[d.category] || d.category)}</a>`
-          : `${esc(DOC_LABELS[d.category] || d.category)} <span style='color:#c00'>(upload failed)</span>`
-        ).join("<br>")
-      : "—",
+    esc(e.registrationNumber || dash),
+    esc(e.trn || dash),
+  ]);
+
+  // Documents get their own table rather than being crammed into the entity
+  // rows, so filename, size and state line up down the page.
+  const entityNameFor = i => (Number.isInteger(i) && p.billing.entities[i] ? p.billing.entities[i].name : "");
+  const docRows = documents.map(d => [
+    esc(entityNameFor(d.entityIndex) || dash),
+    esc(DOC_LABELS[d.category] || d.category || dash),
+    esc(d.filename || dash),
+    d.sizeBytes ? esc(Math.max(1, Math.round(d.sizeBytes / 1024)) + " KB") : dash,
+    d.url
+      ? `<a href='${esc(d.url)}' style='color:#503390;font-weight:600;text-decoration:none'>Download</a>`
+      : `<span style='color:#c0392b'>not stored</span>`,
   ]);
 
   const failed = documents.filter(d => !d.url).length;
-  const storedCount = documents.length - failed;
-  const docsSummary =
-    `<h4 style='${H4}'>DOCUMENTS</h4>` +
-    (documents.length
-      ? `<b>${esc(documents.length)} document${documents.length === 1 ? "" : "s"} uploaded</b>` +
-        (failed ? ` &middot; <span style='color:#c00'>${esc(storedCount)} stored, ${esc(failed)} failed</span>` : " &middot; all stored") +
-        (bundle && bundle.url
-          ? `<br><a href='${esc(bundle.url)}' style='color:#503390;font-weight:600;text-decoration:none'>⬇ Download all ${esc(bundle.count)} as ${esc(bundle.filename)}</a>`
-          : "")
-      : "No documents were uploaded with this request.");
+  const stored = documents.length - failed;
+
+  const heading = t =>
+    `<h4 style='${FONT};color:#503390;font-size:12px;letter-spacing:.6px;text-transform:uppercase;` +
+    `border-bottom:1px solid #e0d8f0;padding-bottom:5px;margin:22px 0 10px'>${esc(t)}</h4>`;
 
   return [
-    `<h3 style='color:#321e57;margin:0 0 4px'>SUPY EXPANSION REQUEST</h3>`,
-    `<p style='color:#888;font-size:11px;margin:0 0 16px'>Received: ${esc(receivedAt)} &middot; Ref: ${esc(submissionId)}</p>`,
+    `<div style="${FONT};font-size:13px;color:#1f1f2b">`,
 
-    `<h4 style='${H4}'>REQUESTER</h4>`,
-    `Company / group: ${esc(r.account)}<br>Contact: ${esc(r.name)}<br>Email: ${esc(r.email)}<br>` +
-    `Phone: ${esc(r.phone || "—")}<br>Country: ${esc(r.country || "—")}`,
+    `<h3 style='${FONT};color:#321e57;font-size:16px;margin:0 0 3px'>Supy expansion request</h3>`,
+    `<p style='${FONT};color:#8b8b9a;font-size:11px;margin:0 0 6px'>` +
+      `${esc(receivedAt)} &middot; Ref ${esc(submissionId)}</p>`,
 
-    `<h4 style='${H4}'>ACCOUNT SCOPE</h4>`,
-    `Sits under: <b>${esc(scope.target || "—")}</b><br>` +
-    `Existing account: ${esc(scope.existingAccountName || "—")}${scope.existingRetailerId ? ` <span style='color:#888'>(Retailer ID: ${esc(scope.existingRetailerId)})</span>` : ""}<br>` +
-    `New account name: ${esc(scope.newAccountName || "—")}<br>` +
+    heading("Request"),
+    kv([
+      ["Account",        esc(r.account)],
+      ["Requested by",   `${esc(r.name)} &middot; ${esc(r.email)}${r.phone ? " &middot; " + esc(r.phone) : ""}`],
+      ["Country",        esc(r.country || dash)],
+      ["Sits under",     `<b>${esc(scope.target || dash)}</b>`],
+      scope.existingAccountName
+        ? ["Existing account", `${esc(scope.existingAccountName)}${scope.existingRetailerId
+            ? ` <span style='color:#8b8b9a'>(retailer ${esc(scope.existingRetailerId)})</span>`
+            : ` <span style='color:#c0392b'>(typed, not verified)</span>`}`]
+        : null,
+      scope.newAccountName ? ["New account", esc(scope.newAccountName)] : null,
+    ]),
 
+    heading("What they are adding"),
+    table(["Item", "Qty|right", "Bills under"], lineRows),
 
-    `<h4 style='${H4}'>WHAT THEY ARE ADDING</h4>`,
-    table(["Item", "Qty", "Billing split"], lineRows),
+    heading("Billing"),
+    kv([["Same legal entity", `<b>${esc(p.billing.sameLegalEntity || dash)}</b>`]]),
+    p.billing.entities.length ? table(["Legal entity", "CRN / license", "TRN / VAT"], entityRows) : "",
 
-    `<h4 style='${H4}'>BILLING</h4>`,
-    `Same legal entity as existing: <b>${esc(p.billing.sameLegalEntity || "—")}</b>`,
-    p.billing.entities.length
-      ? table(["Legal entity", "CRN / license", "TRN / VAT", "Documents"], entityRows)
-      : "",
-    failed ? `<p style='color:#c00;font-size:12px'><b>${failed} document(s) could not be stored.</b> Ask the client to resend them.</p>` : "",
+    heading("Documents"),
+    kv([
+      ["Uploaded", documents.length
+        ? `<b>${esc(documents.length)}</b>` + (failed
+            ? ` &middot; <span style='color:#c0392b'>${esc(stored)} stored, ${esc(failed)} failed &mdash; ask the client to resend</span>`
+            : " &middot; all stored")
+        : "None"],
+      bundle && bundle.url
+        ? ["All documents", `<a href='${esc(bundle.url)}' style='color:#503390;font-weight:600;text-decoration:none'>${esc(bundle.filename)}</a>`]
+        : null,
+    ]),
+    documents.length ? table(["Entity", "Type", "File", "Size|right", ""], docRows) : "",
 
-    docsSummary,
+    heading("Customer note"),
+    `<p style='${FONT};font-size:13px;margin:0;line-height:1.6'>${esc(p.notes || dash).replace(/\n/g, "<br>")}</p>`,
 
-    `<h4 style='${H4}'>NOTES</h4>`,
-    esc(p.notes || "—").replace(/\n/g, "<br>"),
+    `</div>`,
   ].filter(Boolean).join("");
 }
 
-// ─────────────────────────────────────────────────────────────
-// Email (Gmail OAuth refresh-token flow)
-//
-// Two messages: an internal notification to the team, and a receipt to the
-// client showing exactly what they submitted. The receipt only goes out when
-// HubSpot recognised the contact — otherwise anyone could use this endpoint to
-// send Supy-branded mail to an address of their choosing.
-// ─────────────────────────────────────────────────────────────
 const EMAIL_FROM       = "vaishnavi@supy.io";
 const EMAIL_REPLY_TO   = "csms@supy.io";
 const EMAIL_RECIPIENTS = ["vaishnavi@supy.io"];
