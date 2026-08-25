@@ -1236,7 +1236,7 @@ function esc(s) {
 
 // One type stack and one set of cell metrics for every table in the note, so
 // the sections line up with each other instead of each looking hand-made.
-const FONT  = "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif";
+const FONT  = "font-family:-apple-system,BlinkMacSystemFont,system-ui,Helvetica,Arial,sans-serif";
 const TABLE = `border-collapse:collapse;width:100%;font-size:13px;margin:0 0 4px;${FONT}`;
 const TD    = "padding:7px 10px;border-bottom:1px solid #ecebf1;vertical-align:top;line-height:1.5";
 const TH    = "padding:7px 10px;text-align:left;font-weight:600;font-size:11px;letter-spacing:.4px;text-transform:uppercase";
