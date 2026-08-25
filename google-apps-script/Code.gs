@@ -112,35 +112,76 @@ function doGet(e) {
       if (!sh) sh = ss.getSheetByName("Access");
       if (!sh) sh = ss.getSheets()[0];
       if (!sh) return reply({ retailers: [] });
-      var data = sh.getDataRange().getValues();
-      var headers = data[0].map(function(h){ return String(h).trim().toLowerCase(); });
-      var emailIdx = headers.indexOf("email");
-      var nameIdx = headers.indexOf("retailer name");
+      // The directory is one row per user × outlet × location and runs to
+      // several megabytes, so getDataRange().getValues() pulls hundreds of
+      // thousands of cells on every keystroke's worth of lookup — that is what
+      // was timing the Worker out. TextFinder searches server-side and returns
+      // only the matching cells, and the answer is cached per email.
+      var want = String(email).trim().toLowerCase();
+      var cache = null;
+      try { cache = CacheService.getScriptCache(); } catch (err) {}
+      if (cache) {
+        var hit = cache.get("acc:" + want);
+        if (hit) return ContentService.createTextOutput(hit).setMimeType(ContentService.MimeType.JSON);
+      }
+
+      var lastCol  = sh.getLastColumn();
+      var headers  = sh.getRange(1, 1, 1, lastCol).getValues()[0]
+                       .map(function(h){ return String(h).trim().toLowerCase(); });
+      // The directory calls it "User Email"; older copies just "Email".
+      var emailIdx = headers.indexOf("user email");
+      if (emailIdx === -1) emailIdx = headers.indexOf("email");
+      var nameIdx  = headers.indexOf("retailer name");
       if (nameIdx === -1) nameIdx = headers.indexOf("retailer");
       if (nameIdx === -1) nameIdx = headers.indexOf("account");
-      var idIdx = headers.indexOf("retailer id");
+      var idIdx    = headers.indexOf("retailer id");
       if (idIdx === -1) idIdx = headers.indexOf("retailer_id");
-      if (emailIdx === -1 || nameIdx === -1) return reply({ retailers: [] });
-      if (idIdx === -1) return reply({ retailers: [], error: "Access sheet has no 'retailer id' column" });
-      var want = String(email).trim().toLowerCase();
+      if (emailIdx === -1) return reply({ retailers: [], error: "No email column in " + sh.getName() });
+      if (nameIdx === -1 || idIdx === -1) return reply({ retailers: [], error: "No retailer name/id column in " + sh.getName() });
+
+      var rows = [];
+      var found = sh.createTextFinder(want).matchEntireCell(true).matchCase(false).findAll();
+      for (var f = 0; f < found.length && rows.length < 500; f++) {
+        if (found[f].getColumn() === emailIdx + 1 && found[f].getRow() > 1) rows.push(found[f].getRow());
+      }
+      if (!rows.length) {
+        var emptyBody = JSON.stringify({ retailers: [], missingId: 0 });
+        if (cache) { try { cache.put("acc:" + want, emptyBody, 300); } catch (err) {} }
+        return ContentService.createTextOutput(emptyBody).setMimeType(ContentService.MimeType.JSON);
+      }
+
+      // Rows for one user are contiguous in a directory sorted by email, so one
+      // ranged read usually covers them; scattered rows fall back to per-row.
+      rows.sort(function(a,b){ return a - b; });
+      var lo = rows[0], hi = rows[rows.length - 1];
+      var block = null, blockStart = lo;
+      if (hi - lo + 1 <= 1000) block = sh.getRange(lo, 1, hi - lo + 1, lastCol).getValues();
+      function rowValues(r){
+        if (block) return block[r - blockStart];
+        return sh.getRange(r, 1, 1, lastCol).getValues()[0];
+      }
+
       var out = [];
       var seen = {};
       var missingId = 0;
-      for (var i=1;i<data.length;i++){
-        var rowEmail = String(data[i][emailIdx] || "").trim().toLowerCase();
-        if (rowEmail !== want) continue;
-        var name = String(data[i][nameIdx] || "").trim();
+      for (var i = 0; i < rows.length; i++) {
+        var v = rowValues(rows[i]);
+        if (!v) continue;
+        var name = String(v[nameIdx] || "").trim();
         if (!name) continue;
-        var rid = String(data[i][idIdx] || "").trim();
         // The retailer id is the identity everything downstream keys off. A row
         // without one cannot route a request, so it is counted and skipped
         // rather than offered as a choice that quietly resolves to nothing.
+        var rid = String(v[idIdx] || "").trim();
         if (!rid) { missingId++; continue; }
         if (seen[rid]) continue;
         seen[rid] = true;
         out.push({ name: name, retailerId: rid });
       }
-      return reply({ retailers: out, missingId: missingId });
+
+      var body = JSON.stringify({ retailers: out, missingId: missingId });
+      if (cache) { try { cache.put("acc:" + want, body, 600); } catch (err) {} }
+      return ContentService.createTextOutput(body).setMimeType(ContentService.MimeType.JSON);
     }
   } catch (err) {
     return reply({ retailers: [], error: String(err) });
