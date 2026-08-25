@@ -1521,10 +1521,11 @@ async function sendSlack(env, p, documents, contactId, submissionId, ctx = {}) {
   const blocks = [
     { type: "header", text: { type: "plain_text", text: `Expansion request - ${account}`.slice(0, 150), emoji: true } },
     { type: "context", elements: [{ type: "mrkdwn", text:
-      `${accountLine}  ·  ${smk(p.requester.country || "-")}  ·  ${smk(when)}  ·  \`${smk(submissionId).slice(0, 8)}\`` }] },
+      `${accountLine}  ·  ${smk(p.requester.country || "-")}  ·  ${smk(when)}  ·  \`${smk(submissionId).slice(0, 8)}\`  ·  _a request, nothing provisioned_` }] },
     { type: "section", text: { type: "mrkdwn", text:
       `*${totalUnits} unit${totalUnits === 1 ? "" : "s"}*  ·  ${p.lines.length} item${p.lines.length === 1 ? "" : "s"}`
-      + (entityNames.length > 1 ? `  ·  ${entityNames.length} billing entities` : "") } },
+      + (entityNames.length ? `  ·  ${entityNames.length} ${entityNames.length === 1 ? "entity" : "entities"}` : "")
+      + `  ·  ${smk(p.billing.sameLegalEntity || "-").toLowerCase()}` } },
   ];
 
   if (p.lines.length) {
@@ -1534,25 +1535,22 @@ async function sendSlack(env, p, documents, contactId, submissionId, ctx = {}) {
   }
 
   // Two columns of label/value. Slack renders these side by side.
-  const fields = [
-    { type: "mrkdwn", text: `*Requested by*\n${smk(p.requester.name)}\n${smk(p.requester.email)}` },
-    { type: "mrkdwn", text: `*Billing*\n${smk(p.billing.sameLegalEntity || "-")}${entityNames.length ? "\n" + entityNames.map(smk).join(", ") : ""}` },
-    { type: "mrkdwn", text: `*Documents*\n${docsValue}` },
+  const dealValue = ctx.salesDealId
+    ? `<${hsDealLink(ctx.salesDealId)}|${ctx.salesDealId}>`
+      + (ctx.onboardingDeal ? `  ·  from <${hsDealLink(ctx.onboardingDeal.id)}|onboarding>` : "  ·  _no onboarding match_")
+    : "_not created_";
+  blocks.push({ type: "section", fields: [
+    { type: "mrkdwn", text: `*From*\n${smk(p.requester.name)}  ·  ${smk(p.requester.email)}` },
     { type: "mrkdwn", text: `*Owner*\n${mgr && mgr.countryManager ? smk(mgr.countryManager) + (mgr.slack ? ` ${mgr.slack}` : "") : "_unassigned_"}` },
-  ];
-  if (ctx.salesDealId) {
-    fields.push({ type: "mrkdwn", text: `*Deal*\n<${hsDealLink(ctx.salesDealId)}|${ctx.salesDealId}> · Proposal Sent` });
-    if (ctx.onboardingDeal) {
-      fields.push({ type: "mrkdwn", text: `*Onboarding*\n<${hsDealLink(ctx.onboardingDeal.id)}|${smk(str((ctx.onboardingDeal.properties || {}).dealname || ctx.onboardingDeal.id)).slice(0, 40)}>` });
-    }
-  }
-  blocks.push({ type: "section", fields: fields.slice(0, 10) });
+    { type: "mrkdwn", text: `*Deal*\n${dealValue}` },
+    { type: "mrkdwn", text: `*Documents*\n${docsValue}` },
+  ] });
 
   // Their note, trimmed - the whole thing is on the deal.
   if (p.notes && str(p.notes)) {
     const n = str(p.notes).replace(/\s+/g, " ");
     blocks.push({ type: "context", elements: [{ type: "mrkdwn", text:
-      `:speech_balloon: ${smk(n.length > 180 ? n.slice(0, 179) + "\u2026" : n)}` }] });
+      `:speech_balloon: ${smk(n.length > 140 ? n.slice(0, 139) + "\u2026" : n)}` }] });
   }
 
   // Only what needs a decision.
@@ -1587,7 +1585,6 @@ async function sendSlack(env, p, documents, contactId, submissionId, ctx = {}) {
     });
   }
   blocks.push({ type: "actions", elements: buttons.slice(0, 5) });
-  blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: "nothing has been provisioned - this is a request" }] });
 
   try {
     const r = await fetch(env.SLACK_WEBHOOK_URL, {
