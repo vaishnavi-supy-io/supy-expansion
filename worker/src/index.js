@@ -1458,6 +1458,23 @@ function clip(text, max = 2800) {
   return `${kept}\n_…and ${dropped} more — see the full request in HubSpot._`;
 }
 
+// Slack has no tables, so the line items are laid out in a monospace block
+// where columns actually align. Everything else is a short label/value pair -
+// the full detail lives on the deal and in the sheet, and repeating it here
+// just makes the message something people scroll past.
+const pad = (v, n) => { const t = String(v); return t.length > n ? t.slice(0, n - 1) + "\u2026" : t.padEnd(n); };
+
+// The catalogue names are written for the form, where there is room. In a
+// Slack table they only need to be recognisable.
+const SHORT_ITEM = {
+  outlet:       "Outlet licence",
+  ck_addon:     "CK add-on",
+  wh_addon:     "WH add-on",
+  cost_center:  "Cost center",
+  accounting:   "Accounting integration",
+  invoiceinbox: "AI Invoice Inbox",
+};
+
 async function sendSlack(env, p, documents, contactId, submissionId, ctx = {}) {
   if (!env.SLACK_WEBHOOK_URL) {
     console.error("SLACK_WEBHOOK_URL not configured");
@@ -1466,7 +1483,6 @@ async function sendSlack(env, p, documents, contactId, submissionId, ctx = {}) {
 
   const hsContactLink = (id) => `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-1/${id}`;
   const hsDealLink    = (id) => `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-3/${id}`;
-  const hsCoLink      = (id) => `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-2/${id}`;
   const hsPipeline    = `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/objects/0-3/views/all/board?pipeline=${HS.salesPipeline}`;
 
   const mgr        = managersForCountry(str(p.requester.country), env);
@@ -1476,125 +1492,102 @@ async function sendSlack(env, p, documents, contactId, submissionId, ctx = {}) {
   const account    = str(p.requester.account) || "Account";
   const when       = new Date().toLocaleString("en-AE", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Dubai" });
 
-  // The one line that says what this is: how much, and across how many entities.
   const totalUnits = p.lines.reduce((n, l) =>
     n + (Array.isArray(l.allocations) ? l.allocations : []).reduce((m, a) => m + (Number(a.quantity) || 0), 0), 0);
-  const entityCount = p.billing.entities.length;
-  const headline = `*${totalUnits} unit${totalUnits === 1 ? "" : "s"}* across *${p.lines.length} item${p.lines.length === 1 ? "" : "s"}*`
-    + (entityCount > 1 ? `, split across *${entityCount} billing entities*` : "");
+  const entityNames = p.billing.entities.map(e => str(e.name)).filter(Boolean);
 
-  // Which account, said the way a CSM thinks about it.
   const accountLine = scope === "Existing account" && retailer
-    ? `${smk(retailer)}${retailerId ? `  ·  \`${smk(retailerId)}\`` : "  ·  _unverified_"}`
-    : scope === "New account"
-      ? `${smk(str(p.accountScope.newAccountName) || account)}  ·  _new account_`
-      : `${smk(account)}  ·  _${smk(scope || "scope not given")}_`;
+    ? `${smk(retailer)}${retailerId ? "" : "  ·  _unverified_"}`
+    : scope === "New account" ? `${smk(str(p.accountScope.newAccountName) || account)}  ·  _new_`
+    : smk(scope || "scope not given");
 
-  const owner = mgr && mgr.countryManager
-    ? `${smk(mgr.countryManager)}${mgr.slack ? ` ${mgr.slack}` : ""}${mgr.accountManager ? `  ·  AM ${smk(mgr.accountManager)}` : ""}`
-    : null;
+  // Line items, as a table.
+  const table = p.lines.map(l => {
+    const allocs = Array.isArray(l.allocations) ? l.allocations : [];
+    const qty = allocs.reduce((n, a) => n + (Number(a.quantity) || 0), 0);
+    const name = SHORT_ITEM[str(l.id)] || CATALOGUE[str(l.id)] || l.name || l.id;
+    const split = allocs.length > 1
+      ? allocs.map(a => `${a.quantity} ${shortEntity(a.billsUnder)}`).join(", ")
+      : (allocs[0] && allocs[0].billsUnder && allocs[0].billsUnder !== DEFAULT_ENTITY
+          ? shortEntity(allocs[0].billsUnder) : "account entity");
+    return `${String(qty).padStart(3)}   ${pad(name, 22)}  ${split}`;
+  }).join("\n");
+
+  const stored = documents.filter(d => d.url).length;
+  const docsValue = documents.length
+    ? `${stored}/${documents.length} stored${ctx.bundle ? "  ·  <" + ctx.bundle.url + "|.zip>" : ""}`
+    : "none";
 
   const blocks = [
     { type: "header", text: { type: "plain_text", text: `Expansion request - ${account}`.slice(0, 150), emoji: true } },
     { type: "context", elements: [{ type: "mrkdwn", text:
-      `${accountLine}  ·  ${smk(p.requester.country || "country not given")}  ·  ${smk(when)}` }] },
+      `${accountLine}  ·  ${smk(p.requester.country || "-")}  ·  ${smk(when)}  ·  \`${smk(submissionId).slice(0, 8)}\`` }] },
     { type: "section", text: { type: "mrkdwn", text:
-      `${headline}\n${smk(p.requester.name)}  ·  ${smk(p.requester.email)}${p.requester.phone ? `  ·  ${smk(p.requester.phone)}` : ""}`
-      + (owner ? `\n:round_pushpin: ${owner}` : "") } },
+      `*${totalUnits} unit${totalUnits === 1 ? "" : "s"}*  ·  ${p.lines.length} item${p.lines.length === 1 ? "" : "s"}`
+      + (entityNames.length > 1 ? `  ·  ${entityNames.length} billing entities` : "") } },
   ];
 
-  // What they are adding.
   if (p.lines.length) {
-    const rows = p.lines.map(l => {
-      const allocs = Array.isArray(l.allocations) ? l.allocations : [];
-      const qty  = allocs.reduce((n, a) => n + (Number(a.quantity) || 0), 0);
-      const name = smk(CATALOGUE[str(l.id)] || l.name || l.id);
-      if (allocs.length <= 1) {
-        const only = allocs[0];
-        const named = only && only.billsUnder && only.billsUnder !== DEFAULT_ENTITY;
-        return `• *${qty}* ${name}${named ? `  ·  _${smk(only.billsUnder)}_` : ""}`;
-      }
-      return `• *${qty}* ${name}  ·  ${allocs.map(a => `${a.quantity} _${smk(a.billsUnder || DEFAULT_ENTITY)}_`).join(" + ")}`;
-    }).join("\n");
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: clip(`*Adding*\n${rows}`) } });
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: clip("```\n" + table + "\n```") } });
   } else {
     blocks.push({ type: "section", text: { type: "mrkdwn", text: "_No line items - check form validation_" } });
   }
 
-  // Billing, only in as much detail as there is.
-  if (p.billing.entities.length) {
-    const lines = p.billing.entities.map(e =>
-      `• *${smk(e.name)}*  ·  CRN \`${smk(e.registrationNumber || "-")}\`  ·  TRN \`${smk(e.trn || "-")}\``).join("\n");
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: clip(`*Billing* - ${smk(p.billing.sameLegalEntity || "-")}\n${lines}`) } });
-  } else {
-    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `*Billing:* ${smk(p.billing.sameLegalEntity || "-")}` }] });
+  // Two columns of label/value. Slack renders these side by side.
+  const fields = [
+    { type: "mrkdwn", text: `*Requested by*\n${smk(p.requester.name)}\n${smk(p.requester.email)}` },
+    { type: "mrkdwn", text: `*Billing*\n${smk(p.billing.sameLegalEntity || "-")}${entityNames.length ? "\n" + entityNames.map(smk).join(", ") : ""}` },
+    { type: "mrkdwn", text: `*Documents*\n${docsValue}` },
+    { type: "mrkdwn", text: `*Owner*\n${mgr && mgr.countryManager ? smk(mgr.countryManager) + (mgr.slack ? ` ${mgr.slack}` : "") : "_unassigned_"}` },
+  ];
+  if (ctx.salesDealId) {
+    fields.push({ type: "mrkdwn", text: `*Deal*\n<${hsDealLink(ctx.salesDealId)}|${ctx.salesDealId}> · Proposal Sent` });
+    if (ctx.onboardingDeal) {
+      fields.push({ type: "mrkdwn", text: `*Onboarding*\n<${hsDealLink(ctx.onboardingDeal.id)}|${smk(str((ctx.onboardingDeal.properties || {}).dealname || ctx.onboardingDeal.id)).slice(0, 40)}>` });
+    }
   }
+  blocks.push({ type: "section", fields: fields.slice(0, 10) });
 
-  // Documents: always stated, even at zero.
-  const stored = documents.filter(d => d.url).length;
-  blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: documents.length
-    ? `:paperclip: *${documents.length} document${documents.length === 1 ? "" : "s"}*`
-      + (stored === documents.length ? " - all stored" : ` - only ${stored} of ${documents.length} stored`)
-      + (ctx.bundle ? `  ·  <${ctx.bundle.url}|download all as .zip>` : "")
-    : ":paperclip: No documents attached" }] });
-
+  // Their note, trimmed - the whole thing is on the deal.
   if (p.notes && str(p.notes)) {
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: clip(`*They said*\n>${smk(p.notes).split("\n").join("\n>")}`, 1200) } });
+    const n = str(p.notes).replace(/\s+/g, " ");
+    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text:
+      `:speech_balloon: ${smk(n.length > 180 ? n.slice(0, 179) + "\u2026" : n)}` }] });
   }
 
-  // Everything that needs a human decision, gathered in one place rather than
-  // scattered through the message.
+  // Only what needs a decision.
   const flags = [];
   const failed = documents.filter(d => !d.url);
-  if (failed.length) flags.push(`*${failed.length} document(s) failed to store* - ask for: ${failed.map(d => smk(d.filename)).join(", ")}`);
-  if (scope === "Existing account" && retailer && !retailerId) {
-    flags.push(`*${smk(retailer)}* was typed, not picked - this email is not on the retailer access sheet, so nothing is verified. Confirm the account, then add the row.`);
-  } else if (scope === "Existing account" && retailerId && !ctx.onboardingDeal) {
-    flags.push(`No onboarding deal matched retailer \`${smk(retailerId)}\` - check the retailer ID on the onboarding deal.`);
-  }
-  if (!ctx.salesDealId) flags.push("*No deal was created* - raise it by hand.");
-  else if (!ctx.onboardingDeal) flags.push("Deal created with *no owner* - assign it.");
-  else if (ctx.onboardingLinked === false) flags.push("Deal is *not linked* to the onboarding deal - link it by hand.");
-  if (ctx.companyMatched === false) flags.push(`No HubSpot company matched *${smk(crmCompanyName(p))}* - attach this to the right company.`);
+  if (failed.length) flags.push(`${failed.length} document${failed.length === 1 ? "" : "s"} failed to store - ask the client to resend`);
+  if (scope === "Existing account" && retailer && !retailerId) flags.push("account was typed, not picked - not on the access sheet, nothing verified");
+  else if (scope === "Existing account" && retailerId && !ctx.onboardingDeal) flags.push(`no onboarding deal matched \`${smk(retailerId)}\``);
+  if (!ctx.salesDealId) flags.push("*no deal was created* - raise it by hand");
+  else if (!ctx.onboardingDeal) flags.push("deal has *no owner* - assign it");
+  else if (ctx.onboardingLinked === false) flags.push("deal is not linked to the onboarding deal");
+  if (ctx.companyMatched === false) flags.push(`no company matched *${smk(crmCompanyName(p))}* - attach it`);
   if (flags.length) {
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: clip(`:warning: *Needs a human*\n${flags.map(f => `• ${f}`).join("\n")}`) } });
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: clip(`:warning: ${flags.join("\n:warning: ")}`) } });
   }
 
-  // CRM trail, small: the detail belongs on the records themselves.
-  const trail = [];
-  if (ctx.salesDealId)  trail.push(`Deal <${hsDealLink(ctx.salesDealId)}|${ctx.salesDealId}> · Proposal Sent · USD 0`);
-  if (ctx.onboardingDeal) {
-    const od = ctx.onboardingDeal, odp = od.properties || {};
-    trail.push(`Onboarding <${hsDealLink(od.id)}|${smk(odp.dealname || od.id)}>`);
-  }
-  if (ctx.onboardingCompanyIds && ctx.onboardingCompanyIds.length) {
-    trail.push(`Company ${ctx.onboardingCompanyIds.map(id => `<${hsCoLink(id)}|${id}>`).join(", ")}`);
-  }
-  if (trail.length) blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: trail.join("  ·  ") }] });
-
-  // The primary button goes to the deal - that is the record someone works
-  // from. Only when there is no deal does it fall back to the contact, then to
-  // the Sales 360 board.
   const buttons = [{
     type: "button", style: "primary",
-    text: { type: "plain_text", text: ctx.salesDealId ? "Open deal in HubSpot" : (contactId ? "Open contact in HubSpot" : "Open Sales 360"), emoji: true },
+    text: { type: "plain_text", text: ctx.salesDealId ? "Open deal" : (contactId ? "Open contact" : "Open Sales 360"), emoji: true },
     url: ctx.salesDealId ? hsDealLink(ctx.salesDealId) : (contactId ? hsContactLink(contactId) : hsPipeline),
   }];
   if (ctx.salesDealId && contactId) {
     buttons.push({ type: "button", text: { type: "plain_text", text: "Contact", emoji: true }, url: hsContactLink(contactId) });
   }
   if (ctx.bundle) {
-    buttons.push({ type: "button", text: { type: "plain_text", text: "All documents (.zip)", emoji: true }, url: ctx.bundle.url });
+    buttons.push({ type: "button", text: { type: "plain_text", text: "Documents (.zip)", emoji: true }, url: ctx.bundle.url });
+  } else {
+    documents.filter(d => d.url).slice(0, 2).forEach(d => {
+      buttons.push({ type: "button",
+        text: { type: "plain_text", text: (DOC_LABELS[d.category] || d.category).slice(0, 24), emoji: true },
+        url: d.url });
+    });
   }
-  // Slack allows five elements in an actions block.
-  documents.filter(d => d.url).slice(0, 5 - buttons.length).forEach(d => {
-    buttons.push({ type: "button",
-      text: { type: "plain_text", text: (DOC_LABELS[d.category] || d.category).slice(0, 24), emoji: true },
-      url: d.url });
-  });
-  blocks.push({ type: "actions", elements: buttons });
-  blocks.push({ type: "context", elements: [{ type: "mrkdwn", text:
-    `Ref \`${smk(submissionId).slice(0, 8)}\` · nothing has been provisioned - this is a request` }] });
+  blocks.push({ type: "actions", elements: buttons.slice(0, 5) });
+  blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: "nothing has been provisioned - this is a request" }] });
 
   try {
     const r = await fetch(env.SLACK_WEBHOOK_URL, {
@@ -1608,6 +1601,13 @@ async function sendSlack(env, p, documents, contactId, submissionId, ctx = {}) {
     console.error("Slack post threw", String(err));
     return false;
   }
+}
+
+// "Marina Hospitality LLC" -> "Marina Hospitality", so the table column holds.
+function shortEntity(name) {
+  const n = str(name);
+  if (!n || n === DEFAULT_ENTITY) return "account entity";
+  return n.replace(/\s+(LLC|L\.L\.C\.?|FZE|FZ-?LLC|WLL|Ltd\.?|Limited|Co\.?|Company|Trading|Holdings?)$/i, "").slice(0, 24);
 }
 
 function buildSubject(p) {
