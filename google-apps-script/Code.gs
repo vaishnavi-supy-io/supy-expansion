@@ -121,17 +121,26 @@ function doGet(e) {
       var idIdx = headers.indexOf("retailer id");
       if (idIdx === -1) idIdx = headers.indexOf("retailer_id");
       if (emailIdx === -1 || nameIdx === -1) return reply({ retailers: [] });
+      if (idIdx === -1) return reply({ retailers: [], error: "Access sheet has no 'retailer id' column" });
       var want = String(email).trim().toLowerCase();
       var out = [];
+      var seen = {};
+      var missingId = 0;
       for (var i=1;i<data.length;i++){
         var rowEmail = String(data[i][emailIdx] || "").trim().toLowerCase();
         if (rowEmail !== want) continue;
         var name = String(data[i][nameIdx] || "").trim();
         if (!name) continue;
-        var rid = idIdx >=0 ? String(data[i][idIdx] || "").trim() : "";
+        var rid = String(data[i][idIdx] || "").trim();
+        // The retailer id is the identity everything downstream keys off. A row
+        // without one cannot route a request, so it is counted and skipped
+        // rather than offered as a choice that quietly resolves to nothing.
+        if (!rid) { missingId++; continue; }
+        if (seen[rid]) continue;
+        seen[rid] = true;
         out.push({ name: name, retailerId: rid });
       }
-      return reply({ retailers: out });
+      return reply({ retailers: out, missingId: missingId });
     }
   } catch (err) {
     return reply({ retailers: [], error: String(err) });

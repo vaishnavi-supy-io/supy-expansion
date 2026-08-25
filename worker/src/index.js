@@ -287,23 +287,31 @@ async function handleWebhook(request, env, ctx) {
   //    submission: a request that reaches the team without its trade license
   //    is far better than one that is silently lost.
   let documents = [];
+  let bundle = null;
   if (files.length) {
     const uploaded = await uploadDocuments(env, files, account, request);
     documents = uploaded.documents;
+    bundle = uploaded.bundle;
     results.push(`documents:${uploaded.ok}/${files.length}`);
+    if (bundle) results.push(`bundle:zip:${bundle.count}`);
+    else if (files.length > 2) results.push(uploaded.storageConfigured ? "bundle:zip-fail" : "bundle:skipped:no-storage");
   }
   attachDocumentUrls(payload, documents);
 
   // 7. HubSpot.
   let contactId = null;
+  let noteId = null;
+  let companyMatched = null;   // null = not attempted, false = nothing matched
   const token = await getHubspotToken(env);
   if (token) {
     const { id, action } = await upsertContact(token, payload);
     contactId = id;
     if (contactId) {
-      const noteId = await createNote(token, payload, documents, receivedAt, submissionId);
+      noteId = await createNote(token, payload, documents, receivedAt, submissionId, bundle);
       if (noteId) {
-        await linkEverything(token, noteId, contactId, crmCompanyName(payload));
+        const link = await linkEverything(token, noteId, contactId, crmCompanyName(payload));
+        companyMatched = Boolean(link && link.matched);
+        if (!companyMatched) results.push("company:no-match");
         results.push(`hubspot:${action}:note-ok`);
       } else {
         results.push(`hubspot:${action}:note-fail`);
@@ -317,19 +325,20 @@ async function handleWebhook(request, env, ctx) {
 
   // 7b. Existing Account → Onboarding deal lookup + Sales deal creation (new added process)
   let salesDealId = null;
+  let onboardingLinked = null;
   let onboardingDeal = null;
   let onboardingCompanyIds = [];
   if (token && contactId && str(payload.accountScope.target) === "Existing account") {
+    // The retailer id from the access sheet is the only key used here. It used
+    // to fall back to searching `retailer_id EQ "<account name>"` — a display
+    // name matched against an id field, which never hit and made every
+    // unverified account look like a missing onboarding deal. A request with no
+    // sheet-verified id is routed by a human instead of guessed at.
     const retailerId = str(payload.accountScope.existingRetailerId) || "";
     const retailerName = str(payload.accountScope.existingAccountName) || "";
-    const lookupId = retailerId || retailerName; // last resort: name as id
-    if (lookupId) {
+    if (retailerId) {
       try {
-        onboardingDeal = await findOnboardingDealByRetailerId(token, lookupId);
-        // If not found by id, try by name search via deals search with dealname contains?
-        if (!onboardingDeal && retailerName && retailerId !== retailerName) {
-          onboardingDeal = await findOnboardingDealByRetailerId(token, retailerName);
-        }
+        onboardingDeal = await findOnboardingDealByRetailerId(token, retailerId);
         if (onboardingDeal) {
           onboardingCompanyIds = await getDealCompanyIds(token, onboardingDeal.id);
           // Also fetch companies via associations if none direct
@@ -350,7 +359,7 @@ async function handleWebhook(request, env, ctx) {
           const salesOwnerId = (dealStage === HS.handoffStage && accountOwnerId) ? accountOwnerId : (dealOwnerId || accountOwnerId || "");
           const countryForDeal = hsCountry(payload.requester.country) || str(payload.requester.country) || "";
           const dealName = `${str(payload.requester.account) || "Account"} — Expansion: ${buildSubject(payload).slice(0, 80)}`;
-          salesDealId = await createSalesDeal(token, {
+          const created = await createSalesDeal(token, {
             dealname: dealName,
             pipeline: HS.salesPipeline,
             dealstage: HS.proposalSentStage,
@@ -359,16 +368,22 @@ async function handleWebhook(request, env, ctx) {
             deal_currency_code: "USD",
             dealtype: "existingbusiness",
             country: countryForDeal || undefined,
-            retailerId: retailerId || retailerName || undefined,
+            retailerId: retailerId,
+            onboardingDealId: String(onboardingDeal.id),
           }, onboardingCompanyIds, contactId);
+          salesDealId = created.id;
+          onboardingLinked = created.onboardingLinked;
           if (salesDealId) {
             results.push(`salesDeal:created:${salesDealId}`);
+            results.push(created.onboardingLinked
+              ? `salesDeal:linked-onboarding:${onboardingDeal.id}`
+              : "salesDeal:onboarding-link-fail");
           } else {
             results.push("salesDeal:fail");
           }
         } else {
           results.push("salesDeal:skipped:no-onboarding-match");
-          console.error("No onboarding deal found for retailer", lookupId);
+          console.error("No onboarding deal found for retailer id", retailerId);
         }
       } catch (e) {
         console.error("sales deal flow failed", String(e));
@@ -376,6 +391,7 @@ async function handleWebhook(request, env, ctx) {
       }
     } else {
       results.push("salesDeal:skipped:no-retailer-id");
+      console.error("No sheet-verified retailer id for", retailerName || "(no account name)");
     }
     // Contact → onboarding companies (spec gap fix): link contact to the same companies as the onboarding deal, after we know them
     if (contactId && onboardingCompanyIds.length) {
@@ -390,27 +406,43 @@ async function handleWebhook(request, env, ctx) {
         results.push(`contact:linked:${onboardingCompanyIds.length}companies`);
       } catch (e) { console.error("contact link failed", String(e)); }
     }
+    // The note used to reach a company only via the name search, which now
+    // never creates one. When the retailer's onboarding deal names real
+    // companies, put the note on those instead — a better association than the
+    // duplicate a create-on-miss used to produce.
+    if (noteId && !companyMatched && onboardingCompanyIds.length) {
+      try {
+        for (const cid of onboardingCompanyIds) {
+          await fetch(`https://api.hubapi.com/crm/v3/associations/Notes/Companies/batch/create`, {
+            method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ inputs: [{ from: { id: noteId }, to: { id: cid }, type: "note_to_company" }] }),
+          });
+        }
+        companyMatched = true;
+        results.push(`note:linked:${onboardingCompanyIds.length}companies`);
+      } catch (e) { console.error("note company link failed", String(e)); }
+    }
   }
 
   // 8. Slack. Includes country manager + account manager, and onboarding/sales context.
-  const slackCtx = { onboardingDeal, salesDealId, onboardingCompanyIds };
+  const slackCtx = { onboardingDeal, salesDealId, onboardingCompanyIds, companyMatched, onboardingLinked, bundle };
   const slackOk = await sendSlack(env, payload, documents, contactId, submissionId, slackCtx);
   results.push(slackOk ? "slack:ok" : "slack:fail");
 
   // 9. Email. The client receipt is gated on HubSpot having recognised the
   //    contact, so this endpoint cannot be used to send Supy-branded mail to
   //    an arbitrary address.
-  const internalOk = await sendInternalEmail(env, payload, documents, receivedAt, submissionId);
+  const internalOk = await sendInternalEmail(env, payload, documents, receivedAt, submissionId, bundle);
   results.push(internalOk ? "email:ok" : "email:fail");
   if (contactId) {
-    const receiptOk = await sendClientReceipt(env, payload, documents, receivedAt, submissionId);
+    const receiptOk = await sendClientReceipt(env, payload, documents, receivedAt, submissionId, bundle);
     results.push(receiptOk ? "receipt:ok" : "receipt:fail");
   } else {
     results.push("receipt:skipped");
   }
 
   // 10. Google Sheets mirror.
-  const sheetsOk = await logToSheets(env, payload, documents, receivedAt, submissionId);
+  const sheetsOk = await logToSheets(env, payload, documents, receivedAt, submissionId, bundle);
   results.push(sheetsOk ? "sheets:ok" : "sheets:fail");
 
   // 11. Log, best-effort and off the response path.
@@ -734,11 +766,121 @@ function validate(p, files) {
 // ─────────────────────────────────────────────────────────────
 // Documents → Cloudinary
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// ZIP bundling
+// A request with more than two documents is stored as one archive as well as
+// the individual files, so the whole set travels as a single download.
+// Workers has no zip library, so this writes the format directly: STORE (no
+// compression), which is right for PDFs and JPEGs that are already compressed,
+// and costs no CPU beyond the CRC.
+// ─────────────────────────────────────────────────────────────
+// Cloudinary's API origin. Overridable only so the upload path can be pointed
+// at a local stub in tests; unset in every real environment.
+const cloudinaryBase = env => (env.CLOUDINARY_API_BASE || "https://api.cloudinary.com").replace(/\/$/, "");
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    t[i] = c >>> 0;
+  }
+  return t;
+})();
+
+function crc32(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+// entries: [{ name, bytes }] — returns a Uint8Array holding the archive.
+function buildZip(entries, when = new Date()) {
+  const enc = new TextEncoder();
+  // DOS timestamp: seconds have 2-second resolution, hence the >>> 1.
+  const dosTime = ((when.getHours() << 11) | (when.getMinutes() << 5) | (when.getSeconds() >>> 1)) & 0xFFFF;
+  const dosDate = (((when.getFullYear() - 1980) << 9) | ((when.getMonth() + 1) << 5) | when.getDate()) & 0xFFFF;
+
+  const locals = [];
+  const central = [];
+  let offset = 0;
+
+  for (const e of entries) {
+    const name = enc.encode(e.name);
+    const crc  = crc32(e.bytes);
+    const size = e.bytes.length;
+
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0,  0x04034b50, true);   // local file header
+    lh.setUint16(4,  20, true);           // version needed
+    lh.setUint16(6,  0x0800, true);       // UTF-8 filenames
+    lh.setUint16(8,  0, true);            // STORE
+    lh.setUint16(10, dosTime, true);
+    lh.setUint16(12, dosDate, true);
+    lh.setUint32(14, crc, true);
+    lh.setUint32(18, size, true);         // compressed == uncompressed
+    lh.setUint32(22, size, true);
+    lh.setUint16(26, name.length, true);
+    lh.setUint16(28, 0, true);            // no extra field
+    locals.push(new Uint8Array(lh.buffer), name, e.bytes);
+
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0,  0x02014b50, true);   // central directory header
+    ch.setUint16(4,  20, true);           // version made by
+    ch.setUint16(6,  20, true);           // version needed
+    ch.setUint16(8,  0x0800, true);
+    ch.setUint16(10, 0, true);
+    ch.setUint16(12, dosTime, true);
+    ch.setUint16(14, dosDate, true);
+    ch.setUint32(16, crc, true);
+    ch.setUint32(20, size, true);
+    ch.setUint32(24, size, true);
+    ch.setUint16(28, name.length, true);
+    ch.setUint16(30, 0, true);            // extra
+    ch.setUint16(32, 0, true);            // comment
+    ch.setUint16(34, 0, true);            // disk number
+    ch.setUint16(36, 0, true);            // internal attrs
+    ch.setUint32(38, 0, true);            // external attrs
+    ch.setUint32(42, offset, true);       // offset of local header
+    central.push(new Uint8Array(ch.buffer), name);
+
+    offset += 30 + name.length + size;
+  }
+
+  const centralSize = central.reduce((n, c) => n + c.length, 0);
+  const eocd = new DataView(new ArrayBuffer(22));
+  eocd.setUint32(0,  0x06054b50, true);   // end of central directory
+  eocd.setUint16(4,  0, true);
+  eocd.setUint16(6,  0, true);
+  eocd.setUint16(8,  entries.length, true);
+  eocd.setUint16(10, entries.length, true);
+  eocd.setUint32(12, centralSize, true);
+  eocd.setUint32(16, offset, true);
+  eocd.setUint16(20, 0, true);            // no comment
+
+  const parts = [...locals, ...central, new Uint8Array(eocd.buffer)];
+  const total = parts.reduce((n, c) => n + c.length, 0);
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const part of parts) { out.set(part, at); at += part.length; }
+  return out;
+}
+
+// Documents inside the archive are named by entity and category, so two
+// entities that both uploaded "licence.pdf" do not collide.
+function zipEntryName(f, i) {
+  const safe = String(f.name || "document").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
+  const ent  = Number.isInteger(f.entityIndex) ? `entity-${f.entityIndex + 1}` : "entity";
+  return `${ent}/${String(i + 1).padStart(2, "0")}_${f.category || "document"}_${safe}`;
+}
+
 async function uploadDocuments(env, files, account, request) {
   if (!env.CLOUDINARY_CLOUD_NAME || !env.CLOUDINARY_API_KEY || !env.CLOUDINARY_API_SECRET) {
     console.error("Cloudinary not configured — documents were received but not stored");
     return {
       ok: 0,
+      bundle: null,
+      storageConfigured: false,
       documents: files.map(f => ({
         filename: f.name, sizeBytes: f.size, category: f.category,
         entityIndex: f.entityIndex, url: null, error: "storage not configured",
@@ -771,7 +913,7 @@ async function uploadDocuments(env, files, account, request) {
       // raw/upload keeps every type in one bucket; auto/upload reclassifies PDFs
       // as images and breaks the raw download path.
       const res = await fetch(
-        `https://api.cloudinary.com/v1_1/${env.CLOUDINARY_CLOUD_NAME}/raw/upload`,
+        `${cloudinaryBase(env)}/v1_1/${env.CLOUDINARY_CLOUD_NAME}/raw/upload`,
         { method: "POST", body }
       );
       const out = await res.json().catch(() => ({}));
@@ -790,7 +932,58 @@ async function uploadDocuments(env, files, account, request) {
     }
   }));
 
-  return { ok: documents.filter(d => d.url).length, documents };
+  const ok = documents.filter(d => d.url).length;
+
+  // More than two documents: bundle the set into one archive as well, so the
+  // whole request travels as a single download. The individual files stay
+  // uploaded — the HubSpot note lists them per entity, and those links are how
+  // a CSM opens one document without fetching everything.
+  let bundle = null;
+  if (files.length > 2) {
+    try {
+      const entries = await Promise.all(files.map(async (f, i) => ({
+        name: zipEntryName(f, i),
+        bytes: new Uint8Array(await f.file.arrayBuffer()),
+      })));
+      const zipBytes = buildZip(entries);
+      const zipName  = `${slug}-${date}-${files.length}-documents.zip`;
+      const uploaded = await uploadRaw(env, zipBytes, zipName,
+        `supy-expansion/${date}_${slug}/${crypto.randomUUID().slice(0, 8)}_all-documents`, base);
+      if (uploaded) {
+        bundle = { ...uploaded, filename: zipName, count: files.length, sizeBytes: zipBytes.length };
+      }
+    } catch (err) {
+      console.error("zip bundle failed", String(err));   // never sinks the submission
+    }
+  }
+
+  return { ok, documents, bundle, storageConfigured: true };
+}
+
+// Shared Cloudinary raw upload. raw/upload keeps every type in one bucket;
+// auto/upload reclassifies PDFs as images and breaks the raw download path.
+async function uploadRaw(env, bytes, filename, publicId, base) {
+  try {
+    const ts  = Math.floor(Date.now() / 1000).toString();
+    const sig = await sha1Hex(`public_id=${publicId}&timestamp=${ts}${env.CLOUDINARY_API_SECRET}`);
+    const body = new FormData();
+    body.append("file", new Blob([bytes]), filename);
+    body.append("api_key",   env.CLOUDINARY_API_KEY);
+    body.append("timestamp", ts);
+    body.append("signature", sig);
+    body.append("public_id", publicId);
+    const res = await fetch(`${cloudinaryBase(env)}/v1_1/${env.CLOUDINARY_CLOUD_NAME}/raw/upload`,
+      { method: "POST", body });
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) { console.error("Cloudinary raw upload failed", res.status, JSON.stringify(out)); return null; }
+    return {
+      key: out.public_id,
+      url: `${base}/download?key=${encodeURIComponent(out.public_id)}&name=${encodeURIComponent(filename)}`,
+    };
+  } catch (err) {
+    console.error("Cloudinary raw upload threw", String(err));
+    return null;
+  }
 }
 
 // Put each stored URL back on the entity it belongs to, so the note and the
@@ -893,13 +1086,13 @@ async function upsertContact(token, p) {
   return { id: null, action: "failed" };
 }
 
-async function createNote(token, payload, documents, receivedAt, submissionId) {
+async function createNote(token, payload, documents, receivedAt, submissionId, bundle) {
   const res = await fetch("https://api.hubapi.com/crm/v3/objects/notes", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       properties: {
-        hs_note_body: buildNote(payload, documents, receivedAt, submissionId),
+        hs_note_body: buildNote(payload, documents, receivedAt, submissionId, bundle),
         hs_timestamp: new Date().toISOString(),
       },
     }),
@@ -932,36 +1125,39 @@ async function linkEverything(token, noteId, contactId, companyName) {
     }
   } catch (err) { console.error("contact deal lookup failed", String(err)); }
 
-  if (!companyName || companyName.toLowerCase() === "unknown") return;
+  if (!companyName || companyName.toLowerCase() === "unknown") return { matched: false, reason: "no-name" };
 
-  // The company record, created if this is genuinely new.
+  // Match an existing company only. This never creates one: the name here is
+  // the customer's Supy retailer name, which routinely differs from the name
+  // on their HubSpot company ("Iris Abu Dhabi - Addmind" vs "Addmind
+  // Hospitality"), so a create-on-miss silently forked a duplicate company off
+  // every such account and hung the request on the duplicate instead of the
+  // real record. No match is reported to Slack for a human to route.
   try {
     const comps = await fetch("https://api.hubapi.com/crm/v3/objects/companies/search", {
       method: "POST", headers,
       body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: "name", operator: "CONTAINS_TOKEN", value: companyName }] }] }),
     });
     const found = (await comps.json()).results || [];
-
-    let companyId = found[0] && found[0].id;
+    const companyId = found[0] && found[0].id;
     if (!companyId) {
-      const create = await fetch("https://api.hubapi.com/crm/v3/objects/companies", {
-        method: "POST", headers, body: JSON.stringify({ properties: { name: companyName } }),
-      });
-      if (create.status === 201) companyId = (await create.json()).id;
-      else console.error("HubSpot company create failed", create.status, await create.text().catch(() => ""));
+      console.error("no HubSpot company matched", companyName, "- note left unassociated, nothing created");
+      return { matched: false, reason: "no-match" };
     }
 
-    if (companyId) {
-      await assoc("Contacts", contactId, "Companies", companyId, "contact_to_company");
-      await assoc("Notes",    noteId,    "Companies", companyId, "note_to_company");
-      const deals = await fetch(`https://api.hubapi.com/crm/v3/objects/companies/${companyId}/associations/deals`, { headers });
-      if (deals.ok) {
-        for (const deal of (await deals.json()).results || []) {
-          await assoc("Notes", noteId, "Deals", deal.id, "note_to_deal");
-        }
+    await assoc("Contacts", contactId, "Companies", companyId, "contact_to_company");
+    await assoc("Notes",    noteId,    "Companies", companyId, "note_to_company");
+    const deals = await fetch(`https://api.hubapi.com/crm/v3/objects/companies/${companyId}/associations/deals`, { headers });
+    if (deals.ok) {
+      for (const deal of (await deals.json()).results || []) {
+        await assoc("Notes", noteId, "Deals", deal.id, "note_to_deal");
       }
     }
-  } catch (err) { console.error("company association failed", String(err)); }
+    return { matched: true, companyId: String(companyId) };
+  } catch (err) {
+    console.error("company association failed", String(err));
+    return { matched: false, reason: "error" };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -987,7 +1183,7 @@ function table(headers, rows) {
          `<tr style='background:#321e57;color:#fff'>${head}</tr>${body}</table>`;
 }
 
-function buildNote(p, documents, receivedAt, submissionId) {
+function buildNote(p, documents, receivedAt, submissionId, bundle) {
   const r     = p.requester;
   const scope = p.accountScope;
 
@@ -1014,6 +1210,16 @@ function buildNote(p, documents, receivedAt, submissionId) {
   ]);
 
   const failed = documents.filter(d => !d.url).length;
+  const storedCount = documents.length - failed;
+  const docsSummary =
+    `<h4 style='${H4}'>DOCUMENTS</h4>` +
+    (documents.length
+      ? `<b>${esc(documents.length)} document${documents.length === 1 ? "" : "s"} uploaded</b>` +
+        (failed ? ` &middot; <span style='color:#c00'>${esc(storedCount)} stored, ${esc(failed)} failed</span>` : " &middot; all stored") +
+        (bundle && bundle.url
+          ? `<br><a href='${esc(bundle.url)}' style='color:#503390;font-weight:600;text-decoration:none'>⬇ Download all ${esc(bundle.count)} as ${esc(bundle.filename)}</a>`
+          : "")
+      : "No documents were uploaded with this request.");
 
   return [
     `<h3 style='color:#321e57;margin:0 0 4px'>SUPY EXPANSION REQUEST</h3>`,
@@ -1038,6 +1244,8 @@ function buildNote(p, documents, receivedAt, submissionId) {
       ? table(["Legal entity", "CRN / license", "TRN / VAT", "Documents"], entityRows)
       : "",
     failed ? `<p style='color:#c00;font-size:12px'><b>${failed} document(s) could not be stored.</b> Ask the client to resend them.</p>` : "",
+
+    docsSummary,
 
     `<h4 style='${H4}'>NOTES</h4>`,
     esc(p.notes || "—").replace(/\n/g, "<br>"),
@@ -1119,18 +1327,18 @@ function shell(inner) {
 </div>`;
 }
 
-async function sendInternalEmail(env, payload, documents, receivedAt, submissionId) {
+async function sendInternalEmail(env, payload, documents, receivedAt, submissionId, bundle) {
   const token = await getGmailToken(env);
   if (!token) return false;
   return sendGmail(token, {
     to:      EMAIL_RECIPIENTS.join(", "),
     replyTo: str(payload.requester.email) || undefined,
     subject: buildSubject(payload),
-    html:    shell(buildNote(payload, documents, receivedAt, submissionId)),
+    html:    shell(buildNote(payload, documents, receivedAt, submissionId, bundle)),
   });
 }
 
-async function sendClientReceipt(env, payload, documents, receivedAt, submissionId) {
+async function sendClientReceipt(env, payload, documents, receivedAt, submissionId, bundle) {
   const token = await getGmailToken(env);
   if (!token) return false;
 
@@ -1159,7 +1367,7 @@ async function sendClientReceipt(env, payload, documents, receivedAt, submission
       <h3 style="color:#503390;font-size:14px;border-bottom:1px solid #e0d8f0;padding-bottom:6px;margin:0 0 14px">
         What you sent us
       </h3>
-      ${buildNote(payload, documents, receivedAt, submissionId)}
+      ${buildNote(payload, documents, receivedAt, submissionId, bundle)}
       <hr style="border:none;border-top:1px solid #e0d8f0;margin:22px 0">
       <p style="color:#aaa;font-size:11px;margin:0">
         Sent to ${esc(to)} because this request was submitted with that address.
@@ -1285,14 +1493,37 @@ async function sendSlack(env, p, documents, contactId, submissionId, ctx = {}) {
     blocks.push({ type: "section", text: { type: "mrkdwn", text:
       `*CRM routing* — Retailer \`${rid}\`\n` +
       `Onboarding: <${hsDealLink(odId)}|${odName}>  •  Stage \`${odStage}\`  •  Owner \`${odOwner}\` → Account \`${accOwner}\`` +
-      (salesLink ? `\n→ New Sales 360: <${salesLink}|${ctx.salesDealId}>  _Proposal Sent • Existing Business • USD 0_` : `\n_→ Sales 360 deal not created_`)
+      (salesLink
+        ? `\n→ New Sales 360: <${salesLink}|${ctx.salesDealId}>  _Proposal Sent • Existing Business • USD 0_`
+          + (ctx.onboardingLinked === false ? `\n:warning: _Not linked to the onboarding deal — link it by hand_` : `  •  _linked to the onboarding deal_`)
+        : `\n_→ Sales 360 deal not created_`)
     }});
     if (ctx.onboardingCompanyIds && ctx.onboardingCompanyIds.length) {
       blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `Companies: ${ctx.onboardingCompanyIds.map(id => `<${hsCoLink(id)}|${id}>`).join(", ")}` }] });
     }
+  } else if (scope === "Existing account" && retailer && retailerId) {
+    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `:warning: No onboarding deal in \`${HS.onboardingPipeline}\` matched Retailer \`${smk(retailerId)}\` — CSM to verify the retailer ID on the onboarding deal` }] });
   } else if (scope === "Existing account" && retailer) {
-    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `:warning: No onboarding deal in \`${HS.onboardingPipeline}\` matched Retailer \`${smk(retailerId || retailer)}\` — CSM to verify retailer ID` }] });
+    // They typed the account name because the access sheet had no row for their
+    // email, so nothing here is verified and no deal was created.
+    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `:warning: \`${smk(retailer)}\` was typed, not picked — this email is not on the retailer access sheet, so there is no verified retailer ID and no Sales 360 deal. Confirm the account, then add the row.` }] });
   }
+
+  // No company matched. The Worker deliberately does not create one, so the
+  // note is sitting on the contact alone until a human attaches it.
+  if (ctx.companyMatched === false) {
+    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text:
+      `:warning: No HubSpot company matched \`${smk(crmCompanyName(p))}\` — nothing was created. Attach this request to the right company record.` }] });
+  }
+
+  // Always say how many documents came in, whether they stored or not.
+  const stored = documents.filter(d => d.url).length;
+  const docLine = documents.length
+    ? `:paperclip: *${documents.length} document${documents.length === 1 ? "" : "s"} uploaded*` +
+      (stored === documents.length ? " — all stored" : ` — ${stored} of ${documents.length} stored`) +
+      (ctx.bundle ? `  •  <${ctx.bundle.url}|Download all as .zip>` : "")
+    : ":paperclip: *No documents uploaded*";
+  blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: docLine }] });
 
   const failed = documents.filter(d => !d.url);
   if (failed.length) {
@@ -1467,39 +1698,67 @@ async function handleRetailers(request, env) {
   const email = str(new URL(request.url).searchParams.get("email"));
   if (!email || !isEmail(email)) return json({ error: "Valid email required" }, 400, request, env);
 
-  let retailers = [];
+  const started = Date.now();
+  const cacheKey = `ret:${email.toLowerCase()}`;
 
-  // 1. Dedicated sheet URL, e.g. an Apps Script that returns {retailers:[{name, retailerId}]}
+  // A cached answer, so the second render of the form is instant. Hits are held
+  // longer than misses: a miss usually means a source is misconfigured, and a
+  // short TTL lets the fix show up without waiting the cache out.
+  if (env.DRAFTS) {
+    try {
+      const hit = await env.DRAFTS.get(cacheKey);
+      if (hit) {
+        const j = JSON.parse(hit);
+        return json({ ...j, cached: true, ms: Date.now() - started }, 200, request, env);
+      }
+    } catch { /* cache is an optimisation, never a dependency */ }
+  }
+
+  let retailers = [];
+  let source = "sheet-unavailable";
+
+  // The access sheet is the only source of retailer identity. Everything
+  // downstream — the onboarding deal, its owner, its companies, the Sales 360
+  // deal — is keyed off the retailer id this returns, so inferring identity
+  // anywhere else would mean two different answers to "which account is this".
+  // No sheet match means no verified account, said plainly, not guessed at.
+  //
+  // Sheet: docs.google.com/spreadsheets/d/1raBGqWqxVaUcraY0gjR-CFQT3T2_TheemPfOpihmmFE
+  //        gid 599203487, served by google-apps-script/Code.gs doGet.
+  //
+  // No `cache` field on this fetch: Workers does not implement it and throws on
+  // sight, which silently killed this source in production.
   const sheetUrls = [env.RETAILER_SHEET_URL, env.USER_ACCESS_SHEET_URL, env.GOOGLE_SCRIPT_URL].filter(Boolean);
   for (const sheetUrl of sheetUrls) {
     try {
       const sep = sheetUrl.includes("?") ? "&" : "?";
-      const r = await fetch(`${sheetUrl}${sep}email=${encodeURIComponent(email)}`, { cache: "no-store" });
-      if (r.ok) {
-        const j = await r.json().catch(() => null);
-        // Apps Script returns {retailers:[...]} or {status:"ok", retailers:[...]}
-        const list = j && (Array.isArray(j.retailers) ? j.retailers : Array.isArray(j) ? j : []);
-        const mapped = list.map(x => ({
-          name: str(x.name || x.retailerName || x.retailer || x.account || ""),
-          retailerId: str(x.retailerId || x.retailer_id || x.id || x.retailerID || ""),
-        })).filter(x => x.name);
-        if (mapped.length) { retailers = mapped; break; }
-        // Also accept the sheet returning empty but not error — continue to next source
-        if (j && Array.isArray(j.retailers)) { retailers = mapped; break; }
-      }
-    } catch (e) { console.error("retailer sheet fetch failed", String(e)); }
+      const r = await fetch(`${sheetUrl}${sep}email=${encodeURIComponent(email)}`);
+      if (!r.ok) { console.error("access sheet returned", r.status); continue; }
+      const j = await r.json().catch(() => null);
+      if (!j) { console.error("access sheet returned unparseable body"); continue; }
+      if (j.error) { console.error("access sheet error", String(j.error)); continue; }
+      const list = Array.isArray(j.retailers) ? j.retailers : Array.isArray(j) ? j : null;
+      if (!list) continue;   // not the access sheet — try the next url
+      // Only rows carrying a retailer id can route anything.
+      retailers = list.map(x => ({
+        name:       str(x.name || x.retailerName || x.retailer || x.account || ""),
+        retailerId: str(x.retailerId || x.retailer_id || x.id || x.retailerID || ""),
+      })).filter(x => x.name && x.retailerId);
+      source = retailers.length ? "sheet" : "sheet-no-match";
+      if (j.missingId) console.error("access sheet rows skipped for a missing retailer id:", j.missingId, email);
+      break;
+    } catch (e) { console.error("access sheet fetch failed", String(e)); }
   }
 
-  // 2. HubSpot fallback: companies associated to the contact -> retailer names via deals/companies
-  if (!retailers.length) {
-    const token = await getHubspotToken(env).catch(() => null);
-    if (token) {
-      try { retailers = await retailersForEmailViaHubSpot(token, email); } catch (e) { console.error("hubspot retailer lookup failed", String(e)); }
-    }
+  const body = { retailers, source };
+  if (env.DRAFTS) {
+    try {
+      await env.DRAFTS.put(cacheKey, JSON.stringify(body), { expirationTtl: retailers.length ? 600 : 60 });
+    } catch { /* not fatal */ }
   }
 
   // Always return an array; empty means frontend stays in free-text mode.
-  return json({ retailers }, 200, request, env);
+  return json({ ...body, ms: Date.now() - started }, 200, request, env);
 }
 
 function handleGeo(request, env) {
@@ -1510,54 +1769,6 @@ function handleGeo(request, env) {
   return json({ country, cfCountry: cfCountry || null, headerCountry: hdrCountry || null }, 200, request, env);
 }
 
-async function retailersForEmailViaHubSpot(token, email) {
-  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
-  // Find contact by email
-  const search = await fetch("https://api.hubapi.com/crm/v3/objects/contacts/search", {
-    method: "POST", headers,
-    body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: "email", operator: "EQ", value: email }] }], properties: ["email"], limit: 1 }),
-  });
-  if (!search.ok) return [];
-  const found = (await search.json()).results || [];
-  if (!found.length) return [];
-  const contactId = found[0].id;
-
-  // Companies associated to contact
-  const assoc = await fetch(`https://api.hubapi.com/crm/v3/objects/contacts/${contactId}/associations/companies`, { headers });
-  if (!assoc.ok) return [];
-  const cids = ((await assoc.json()).results || []).map(x => x.id);
-  if (!cids.length) return [];
-
-  const out = [];
-  for (const cid of cids.slice(0, 20)) {
-    try {
-      const comp = await fetch(`https://api.hubapi.com/crm/v3/objects/companies/${cid}?properties=name`, { headers });
-      if (!comp.ok) continue;
-      const j = await comp.json();
-      const name = str(j.properties && j.properties.name);
-      if (!name) continue;
-      // Attempt to find retailer_id via associated onboarding deals
-      const dealsRes = await fetch(`https://api.hubapi.com/crm/v3/objects/companies/${cid}/associations/deals`, { headers });
-      let rid = "";
-      if (dealsRes.ok) {
-        const deals = ((await dealsRes.json()).results || []);
-        for (const d of deals.slice(0, 10)) {
-          const dr = await fetch(`https://api.hubapi.com/crm/v3/objects/deals/${d.id}?properties=${HS.retailerIdProp},pipeline`, { headers });
-          if (!dr.ok) continue;
-          const dj = await dr.json();
-          const p = dj.properties || {};
-          if (str(p.pipeline) === HS.onboardingPipeline && str(p[HS.retailerIdProp])) { rid = str(p[HS.retailerIdProp]); break; }
-        }
-      }
-      out.push({ name, retailerId: rid });
-    } catch {}
-  }
-  return out;
-}
-
-// ─────────────────────────────────────────────────────────────
-// Onboarding → Sales deal helpers
-// ─────────────────────────────────────────────────────────────
 async function findOnboardingDealByRetailerId(token, retailerId) {
   const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
   const body = {
@@ -1606,16 +1817,16 @@ async function createSalesDeal(token, props, companyIds, contactId) {
   if (!r.ok) {
     const t = await r.text().catch(()=> "");
     console.error("sales deal create failed", r.status, t);
-    return null;
+    return { id: null, onboardingLinked: false };
   }
   const j = await r.json().catch(()=> ({}));
   const dealId = j.id ? String(j.id) : null;
-  if (!dealId) return null;
-  await associateSalesDeal(token, dealId, companyIds, contactId);
-  return dealId;
+  if (!dealId) return { id: null, onboardingLinked: false };
+  const onboardingLinked = await associateSalesDeal(token, dealId, companyIds, contactId, props.onboardingDealId);
+  return { id: dealId, onboardingLinked };
 }
 
-async function associateSalesDeal(token, dealId, companyIds, contactId) {
+async function associateSalesDeal(token, dealId, companyIds, contactId, onboardingDealId) {
   const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
   const assoc = (from, fromId, to, toId, type) =>
     fetch(`https://api.hubapi.com/crm/v3/associations/${from}/${to}/batch/create`, {
@@ -1629,6 +1840,21 @@ async function associateSalesDeal(token, dealId, companyIds, contactId) {
   if (contactId) {
     await assoc("Deals", dealId, "Contacts", contactId, "deal_to_contact");
   }
+  // The expansion deal belongs to the onboarding deal it came out of: same
+  // retailer, same companies, and the onboarding deal is where its owner and
+  // account manager were read from. Without the link a CSM opening either one
+  // cannot see the other. Deal-to-deal is a same-object association, so it goes
+  // through the v4 default endpoint rather than the v3 named types above.
+  if (onboardingDealId) {
+    try {
+      const r = await fetch(
+        `https://api.hubapi.com/crm/v4/objects/deals/${dealId}/associations/default/deals/${onboardingDealId}`,
+        { method: "PUT", headers });
+      if (!r.ok) console.error("deal_to_deal link failed", r.status, await r.text().catch(()=> ""));
+      return r.ok;
+    } catch (e) { console.error("deal_to_deal link threw", String(e)); return false; }
+  }
+  return null;
 }
 
 function formBaseUrl(env) {
@@ -1642,7 +1868,7 @@ function formBaseUrl(env) {
 // the team working through what actually needs setting up. Both carry the same
 // submission ref so a row can be traced back to the CRM note.
 // ─────────────────────────────────────────────────────────────
-async function logToSheets(env, p, documents, receivedAt, submissionId) {
+async function logToSheets(env, p, documents, receivedAt, submissionId, bundle) {
   if (!env.GOOGLE_SCRIPT_URL) return false;
 
 
@@ -1683,6 +1909,10 @@ async function logToSheets(env, p, documents, receivedAt, submissionId) {
         entities: p.billing.entities.map(e => ({
           name: e.name, registrationNumber: e.registrationNumber || "", trn: e.trn || "",
         })),
+        documentCount:  documents.length,
+        documentsStored: documents.filter(d => d.url).length,
+        bundleUrl:      bundle && bundle.url ? bundle.url : "",
+        bundleFilename: bundle ? bundle.filename : "",
         documents: documents.map(d => ({ filename: d.filename, category: d.category, url: d.url || "" })),
         notes: p.notes || "",
         rows,

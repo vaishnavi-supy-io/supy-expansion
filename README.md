@@ -44,6 +44,7 @@ Cloudflare Worker
      │
      ├─→ Cloudinary      documents, stored under supy-expansion/{date}_{account}/
      ├─→ HubSpot         contact upsert → HTML note → associations (company, deals)
+     │                   Companies are matched, never created — see below
      ├─→ Slack           Block Kit summary with document + HubSpot buttons
      ├─→ Gmail           internal notification + client receipt
      ├─→ Sheets          Requests row + one Items row per outlet/feature line
@@ -166,6 +167,43 @@ is checked again here, because the endpoint is public:
 
 ---
 
+## Retailer identity comes from the access sheet
+
+One principle governs the whole chain: **the retailer id in the access sheet is
+the identity, and nothing else is.**
+
+| | |
+|---|---|
+| Sheet | `1raBGqWqxVaUcraY0gjR-CFQT3T2_TheemPfOpihmmFE`, gid `599203487` |
+| Served by | `google-apps-script/Code.gs` → `doGet(?email=)` |
+| Read by | `GET /retailers?email=` → `{retailers:[{name, retailerId}], source}` |
+
+The sheet is keyed by email and answers one question: which retailers may this
+person raise a request for. Rows without a retailer id are skipped — an id-less
+row cannot route anything, so offering it would produce a choice that quietly
+resolves to nothing. The chosen row's id travels in the payload as
+`accountScope.existingRetailerId`, and the Worker finds the onboarding deal with
+`retailer_id EQ <that id>` in pipeline `21524094`. Owner, companies and the new
+Sales 360 deal all follow from the deal that lookup returns.
+
+Nothing else infers identity. The Worker used to fall back to reading the
+contact's companies out of HubSpot, and to searching `retailer_id EQ "<account
+name>"` — a display name matched against an id field, which never hit. Both are
+gone: two sources of truth for "which account is this" is worse than one source
+and an honest gap.
+
+When the sheet has no row for an email the form still accepts a typed account
+name, because blocking a customer is worse than routing one by hand. That
+request carries no retailer id, creates no Sales 360 deal, and Slack says so:
+*"typed, not picked — this email is not on the retailer access sheet."* The fix
+is to add the row.
+
+`source` in the response names what happened: `sheet`, `sheet-no-match`,
+`sheet-unavailable`. Repeat lookups are cached in KV for 10 minutes on a hit and
+60 seconds on a miss, so a corrected sheet shows up quickly.
+
+---
+
 ## Failure behaviour
 
 Each downstream leg is independent and its outcome is reported in the `details`
@@ -178,6 +216,21 @@ that is silently dropped is not.
 
 If HubSpot auth fails the submission still reaches Slack, so nothing is lost
 while credentials are fixed.
+
+**The Worker never creates a company.** It matches the customer's retailer name
+against existing HubSpot companies and associates the note and contact to what
+it finds. It used to create one on a miss, which was wrong: a Supy retailer name
+routinely differs from the name on the HubSpot company — "Iris Abu Dhabi -
+Addmind" against "Addmind Hospitality" — so every such account got a duplicate
+company forked off it, and the request landed on the duplicate rather than the
+real record. On a miss now, the note falls back to the companies named by the
+retailer's onboarding deal; failing that the request reports `company:no-match`
+and Slack asks a CSM to attach it. Contacts, notes and deals are still created.
+
+One more source sits outside this code: HubSpot's own **"Create and associate
+companies with contacts"** portal setting mints a company from a new contact's
+email domain, independently of what the Worker does. Turn it off in Settings →
+Objects → Companies if no automatic company creation is wanted at all.
 
 ---
 
