@@ -79,9 +79,9 @@ function doPost(e) {
 
 var DATA_SPREADSHEET_ID = "1raBGqWqxVaUcraY0gjR-CFQT3T2_TheemPfOpihmmFE";
 var DATA_SHEET_GID = 599203487;
-// Where Requests/Items are written. Leave null to use the spreadsheet this script is bound to.
-// IMPORTANT: Do NOT set this to the Data sheet - it refreshes daily and wipes your writes.
-var LOG_SPREADSHEET_ID = null; // e.g. "1AbC...logSheetId"
+// Where Requests/Items are written - a spreadsheet of our own, never the
+// directory above: that one refreshes daily and would wipe every row.
+var LOG_SPREADSHEET_ID = "1f0pRoEUI9XFWscSQ9uo5tboFGmMy68PBGi5ZFFBQuHQ";
 var ACCESS_SPREADSHEET_ID = DATA_SPREADSHEET_ID;
 var ACCESS_SHEET_GID = DATA_SHEET_GID;
 

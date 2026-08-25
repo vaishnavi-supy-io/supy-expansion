@@ -176,6 +176,7 @@ the identity, and nothing else is.**
 |---|---|
 | Sheet | `1raBGqWqxVaUcraY0gjR-CFQT3T2_TheemPfOpihmmFE`, gid `599203487` |
 | Served by | `google-apps-script/Code.gs` → `doGet(?email=)` |
+| Read-only | The directory is owned elsewhere and refreshed daily. Requests and Items rows are written to a separate spreadsheet, `1f0pRoEUI9XFWscSQ9uo5tboFGmMy68PBGi5ZFFBQuHQ`, set as `LOG_SPREADSHEET_ID`. `getLogSpreadsheet()` refuses to write to the directory. |
 | Read by | `GET /retailers?email=` → `{retailers:[{name, retailerId}], source}` |
 
 The sheet is keyed by email and answers one question: which retailers may this
