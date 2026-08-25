@@ -194,7 +194,7 @@ export default {
         return await handleDownload(request, env);
       }
       if (url.pathname === "/retailers" && request.method === "GET") {
-        return await handleRetailers(request, env);
+        return await handleRetailers(request, env, ctx);
       }
       if (url.pathname === "/geo" && request.method === "GET") {
         return handleGeo(request, env);
@@ -1694,7 +1694,36 @@ const isDraftKey  = k => typeof k === "string" && /^[a-f0-9]{40}$/.test(k);
 // ─────────────────────────────────────────────────────────────
 // Retailers by email (Existing Account filtering)
 // ─────────────────────────────────────────────────────────────
-async function handleRetailers(request, env) {
+// How long a customer waits on the access sheet before the form moves on, and
+// how long the background pass gets to warm the cache afterwards.
+const SHEET_TIMEOUT_MS = 6000;
+const SHEET_BACKGROUND_TIMEOUT_MS = 25000;
+
+async function readAccessSheet(sheetUrl, email, timeoutMs) {
+  const sep = sheetUrl.includes("?") ? "&" : "?";
+  try {
+    const r = await fetch(`${sheetUrl}${sep}email=${encodeURIComponent(email)}`,
+      { signal: AbortSignal.timeout(timeoutMs) });
+    if (!r.ok) { console.error("access sheet returned", r.status); return { list: null }; }
+    const j = await r.json().catch(() => null);
+    if (!j)       { console.error("access sheet returned unparseable body"); return { list: null }; }
+    if (j.error)  { console.error("access sheet error", String(j.error));    return { list: null }; }
+    const rows = Array.isArray(j.retailers) ? j.retailers : Array.isArray(j) ? j : null;
+    if (!rows) return { list: null };            // not the access sheet
+    if (j.missingId) console.error("access sheet rows skipped for a missing retailer id:", j.missingId, email);
+    // Only rows carrying a retailer id can route anything.
+    return { list: rows.map(x => ({
+      name:       str(x.name || x.retailerName || x.retailer || x.account || ""),
+      retailerId: str(x.retailerId || x.retailer_id || x.id || x.retailerID || ""),
+    })).filter(x => x.name && x.retailerId) };
+  } catch (e) {
+    const timedOut = String(e).includes("aborted") || String(e).includes("timed out") || (e && e.name === "TimeoutError");
+    console.error("access sheet fetch failed", timedOut ? `timed out after ${timeoutMs}ms` : String(e));
+    return { list: null, timedOut };
+  }
+}
+
+async function handleRetailers(request, env, ctx) {
   const email = str(new URL(request.url).searchParams.get("email"));
   if (!email || !isEmail(email)) return json({ error: "Valid email required" }, 400, request, env);
 
@@ -1728,30 +1757,38 @@ async function handleRetailers(request, env) {
   //
   // No `cache` field on this fetch: Workers does not implement it and throws on
   // sight, which silently killed this source in production.
+  // Someone is waiting on this with a half-filled form in front of them, so the
+  // sheet gets a few seconds and no more. Apps Script can take far longer than
+  // that on a cold start; when it does, the answer comes back empty and the
+  // lookup continues in the background so the cache is warm for the retry.
   const sheetUrls = [env.RETAILER_SHEET_URL, env.USER_ACCESS_SHEET_URL, env.GOOGLE_SCRIPT_URL].filter(Boolean);
+  let timedOut = false;
   for (const sheetUrl of sheetUrls) {
-    try {
-      const sep = sheetUrl.includes("?") ? "&" : "?";
-      const r = await fetch(`${sheetUrl}${sep}email=${encodeURIComponent(email)}`);
-      if (!r.ok) { console.error("access sheet returned", r.status); continue; }
-      const j = await r.json().catch(() => null);
-      if (!j) { console.error("access sheet returned unparseable body"); continue; }
-      if (j.error) { console.error("access sheet error", String(j.error)); continue; }
-      const list = Array.isArray(j.retailers) ? j.retailers : Array.isArray(j) ? j : null;
-      if (!list) continue;   // not the access sheet — try the next url
-      // Only rows carrying a retailer id can route anything.
-      retailers = list.map(x => ({
-        name:       str(x.name || x.retailerName || x.retailer || x.account || ""),
-        retailerId: str(x.retailerId || x.retailer_id || x.id || x.retailerID || ""),
-      })).filter(x => x.name && x.retailerId);
-      source = retailers.length ? "sheet" : "sheet-no-match";
-      if (j.missingId) console.error("access sheet rows skipped for a missing retailer id:", j.missingId, email);
-      break;
-    } catch (e) { console.error("access sheet fetch failed", String(e)); }
+    const got = await readAccessSheet(sheetUrl, email, SHEET_TIMEOUT_MS);
+    if (got.timedOut) { timedOut = true; continue; }
+    if (!got.list) continue;                 // unreachable, or not the access sheet
+    retailers = got.list;
+    source = retailers.length ? "sheet" : "sheet-no-match";
+    break;
+  }
+  if (!retailers.length && timedOut) {
+    source = "sheet-timeout";
+    // Finish the lookup after the response goes out, and cache what it finds.
+    if (ctx && typeof ctx.waitUntil === "function" && env.DRAFTS) {
+      ctx.waitUntil((async () => {
+        for (const sheetUrl of sheetUrls) {
+          const late = await readAccessSheet(sheetUrl, email, SHEET_BACKGROUND_TIMEOUT_MS);
+          if (!late.list) continue;
+          const body = { retailers: late.list, source: late.list.length ? "sheet" : "sheet-no-match" };
+          try { await env.DRAFTS.put(cacheKey, JSON.stringify(body), { expirationTtl: late.list.length ? 600 : 60 }); } catch {}
+          return;
+        }
+      })());
+    }
   }
 
   const body = { retailers, source };
-  if (env.DRAFTS) {
+  if (env.DRAFTS && source !== "sheet-timeout") {
     try {
       await env.DRAFTS.put(cacheKey, JSON.stringify(body), { expirationTtl: retailers.length ? 600 : 60 });
     } catch { /* not fatal */ }
