@@ -45,6 +45,11 @@
 
 const HUBSPOT_PORTAL_ID = "9423176";
 
+// HubSpot's API origin. Overridable only so the CRM calls can be pointed at a
+// local stub in tests; unset in every real environment. It carries the token,
+// so nothing but a trusted env var may ever set it.
+let HUBSPOT_API = `${HUBSPOT_API}`;
+
 // Mirrors CONFIG in the form. Enforced again here because client-side limits
 // are a courtesy to the user, not a control.
 const LIMITS = {
@@ -168,6 +173,7 @@ function json(data, status, request, env) {
 // ─────────────────────────────────────────────────────────────
 export default {
   async fetch(request, env, ctx) {
+    if (env.HUBSPOT_API_BASE) HUBSPOT_API = String(env.HUBSPOT_API_BASE).replace(/\/$/, "");
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS") {
@@ -302,6 +308,7 @@ async function handleWebhook(request, env, ctx) {
   let contactId = null;
   let noteId = null;
   let companyMatched = null;   // null = not attempted, false = nothing matched
+  let matchedCompanyId = null;
   const token = await getHubspotToken(env);
   if (token) {
     const { id, action } = await upsertContact(token, payload);
@@ -311,6 +318,7 @@ async function handleWebhook(request, env, ctx) {
       if (noteId) {
         const link = await linkEverything(token, noteId, contactId, crmCompanyName(payload));
         companyMatched = Boolean(link && link.matched);
+        matchedCompanyId = (link && link.companyId) || null;
         if (!companyMatched) results.push("company:no-match");
         results.push(`hubspot:${action}:note-ok`);
       } else {
@@ -323,97 +331,135 @@ async function handleWebhook(request, env, ctx) {
     results.push("hubspot:auth-fail");
   }
 
-  // 7b. Existing Account → Onboarding deal lookup + Sales deal creation (new added process)
+  // 7b. Every submission gets a deal, associated to the contact, the company
+  //     and the note. It used to be created only when a verified retailer id
+  //     resolved an onboarding deal, so a new account — or a customer not yet
+  //     on the access sheet — produced a note and nothing to work from. The
+  //     onboarding deal still enriches it (owner, companies, retailer id) when
+  //     it is found; its absence no longer means no deal.
   let salesDealId = null;
   let onboardingLinked = null;
   let onboardingDeal = null;
   let onboardingCompanyIds = [];
-  if (token && contactId && str(payload.accountScope.target) === "Existing account") {
-    // The retailer id from the access sheet is the only key used here. It used
-    // to fall back to searching `retailer_id EQ "<account name>"` — a display
-    // name matched against an id field, which never hit and made every
-    // unverified account look like a missing onboarding deal. A request with no
-    // sheet-verified id is routed by a human instead of guessed at.
-    const retailerId = str(payload.accountScope.existingRetailerId) || "";
+  if (token && contactId) {
+    const scopeTarget  = str(payload.accountScope.target);
+    const retailerId   = str(payload.accountScope.existingRetailerId) || "";
     const retailerName = str(payload.accountScope.existingAccountName) || "";
-    if (retailerId) {
+
+    // The retailer id from the access sheet is the only key used for the
+    // onboarding lookup. Matching a display name against an id field never hit.
+    if (scopeTarget === "Existing account" && retailerId) {
       try {
         onboardingDeal = await findOnboardingDealByRetailerId(token, retailerId);
         if (onboardingDeal) {
           onboardingCompanyIds = await getDealCompanyIds(token, onboardingDeal.id);
-          // Also fetch companies via associations if none direct
           if (!onboardingCompanyIds.length) {
-            // fallback via contact's companies
             try {
-              const compAssoc = await fetch(`https://api.hubapi.com/crm/v3/objects/contacts/${contactId}/associations/companies`, { headers: { Authorization: `Bearer ${token}` } });
+              const compAssoc = await fetch(`${HUBSPOT_API}/crm/v3/objects/contacts/${contactId}/associations/companies`, { headers: { Authorization: `Bearer ${token}` } });
               if (compAssoc.ok) {
                 const j = await compAssoc.json().catch(()=> ({}));
                 onboardingCompanyIds = (j.results || []).map(x => String(x.id));
               }
             } catch {}
           }
-          const props = onboardingDeal.properties || {};
-          const dealStage = str(props.dealstage);
-          const accountOwnerId = str(props[HS.accountOwnerProp] || props.account_owner || "");
-          const dealOwnerId = str(props.hubspot_owner_id || "");
-          const salesOwnerId = (dealStage === HS.handoffStage && accountOwnerId) ? accountOwnerId : (dealOwnerId || accountOwnerId || "");
-          const countryForDeal = hsCountry(payload.requester.country) || str(payload.requester.country) || "";
-          const dealName = `${str(payload.requester.account) || "Account"} — Expansion: ${buildSubject(payload).slice(0, 80)}`;
-          const created = await createSalesDeal(token, {
-            dealname: dealName,
-            pipeline: HS.salesPipeline,
-            dealstage: HS.proposalSentStage,
-            hubspot_owner_id: salesOwnerId || undefined,
-            amount: 0,
-            deal_currency_code: "USD",
-            dealtype: "existingbusiness",
-            country: countryForDeal || undefined,
-            retailerId: retailerId,
-            onboardingDealId: String(onboardingDeal.id),
-          }, onboardingCompanyIds, contactId);
-          salesDealId = created.id;
-          onboardingLinked = created.onboardingLinked;
-          if (salesDealId) {
-            results.push(`salesDeal:created:${salesDealId}`);
-            results.push(created.onboardingLinked
-              ? `salesDeal:linked-onboarding:${onboardingDeal.id}`
-              : "salesDeal:onboarding-link-fail");
-          } else {
-            results.push("salesDeal:fail");
-          }
         } else {
-          results.push("salesDeal:skipped:no-onboarding-match");
+          results.push("onboarding:no-match");
           console.error("No onboarding deal found for retailer id", retailerId);
         }
       } catch (e) {
-        console.error("sales deal flow failed", String(e));
-        results.push("salesDeal:error");
+        console.error("onboarding lookup failed", String(e));
+        results.push("onboarding:error");
       }
-    } else {
-      results.push("salesDeal:skipped:no-retailer-id");
+    } else if (scopeTarget === "Existing account") {
+      results.push("onboarding:skipped:no-retailer-id");
       console.error("No sheet-verified retailer id for", retailerName || "(no account name)");
     }
-    // Contact → onboarding companies (spec gap fix): link contact to the same companies as the onboarding deal, after we know them
-    if (contactId && onboardingCompanyIds.length) {
+
+    // Owner comes from the onboarding deal when there is one: its account
+    // manager once it has reached handoff, its own owner before that.
+    const odProps        = (onboardingDeal && onboardingDeal.properties) || {};
+    const accountOwnerId = str(odProps[HS.accountOwnerProp] || odProps.account_owner || "");
+    const dealOwnerId    = str(odProps.hubspot_owner_id || "");
+    const salesOwnerId   = (str(odProps.dealstage) === HS.handoffStage && accountOwnerId)
+      ? accountOwnerId : (dealOwnerId || accountOwnerId || "");
+
+    // The onboarding deal's companies when known, otherwise whatever the note
+    // matched. Never a company we invented.
+    const companyIds = onboardingCompanyIds.length
+      ? onboardingCompanyIds
+      : (matchedCompanyId ? [matchedCompanyId] : []);
+
+    const countryForDeal = hsCountry(payload.requester.country) || str(payload.requester.country) || "";
+    const dealName = `${str(payload.requester.account) || "Account"} — Expansion: ${buildSubject(payload).slice(0, 80)}`;
+
+    try {
+      const created = await createSalesDeal(token, {
+        dealname: dealName,
+        pipeline: HS.salesPipeline,
+        dealstage: HS.proposalSentStage,
+        hubspot_owner_id: salesOwnerId || undefined,
+        amount: 0,
+        deal_currency_code: "USD",
+        // A separate new account is new business; anything else is an existing
+        // customer buying more.
+        dealtype: scopeTarget === "New account" ? "newbusiness" : "existingbusiness",
+        country: countryForDeal || undefined,
+        retailerId: retailerId || undefined,
+        onboardingDealId: onboardingDeal ? String(onboardingDeal.id) : undefined,
+      }, companyIds, contactId);
+
+      salesDealId = created.id;
+      onboardingLinked = created.onboardingLinked;
+
+      if (salesDealId) {
+        results.push(`salesDeal:created:${salesDealId}`);
+        results.push(companyIds.length ? `salesDeal:linked:${companyIds.length}companies` : "salesDeal:no-company");
+        if (onboardingDeal) {
+          results.push(created.onboardingLinked
+            ? `salesDeal:linked-onboarding:${onboardingDeal.id}`
+            : "salesDeal:onboarding-link-fail");
+        }
+        // The note is written before the deal exists, so it has to be attached
+        // here — otherwise the deal a CSM opens has no record of what was asked
+        // for.
+        if (noteId) {
+          try {
+            const r = await fetch(`${HUBSPOT_API}/crm/v3/associations/Notes/Deals/batch/create`, {
+              method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+              body: JSON.stringify({ inputs: [{ from: { id: noteId }, to: { id: salesDealId }, type: "note_to_deal" }] }),
+            });
+            results.push(r.ok ? "note:linked:deal" : "note:deal-link-fail");
+            if (!r.ok) console.error("note_to_deal failed", r.status, await r.text().catch(()=> ""));
+          } catch (e) { console.error("note_to_deal threw", String(e)); results.push("note:deal-link-fail"); }
+        }
+      } else {
+        results.push("salesDeal:fail");
+      }
+    } catch (e) {
+      console.error("sales deal flow failed", String(e));
+      results.push("salesDeal:error");
+    }
+
+    // Contact → the same companies the deal is on.
+    if (companyIds.length) {
       try {
-        for (const cid of onboardingCompanyIds) {
-          const assocRes = await fetch(`https://api.hubapi.com/crm/v3/associations/Contacts/Companies/batch/create`, {
+        for (const cid of companyIds) {
+          const assocRes = await fetch(`${HUBSPOT_API}/crm/v3/associations/Contacts/Companies/batch/create`, {
             method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
             body: JSON.stringify({ inputs: [{ from: { id: contactId }, to: { id: cid }, type: "contact_to_company" }] }),
           });
           if (!assocRes.ok) console.error("contact_to_company assoc failed", cid, assocRes.status, await assocRes.text().catch(()=> ""));
         }
-        results.push(`contact:linked:${onboardingCompanyIds.length}companies`);
+        results.push(`contact:linked:${companyIds.length}companies`);
       } catch (e) { console.error("contact link failed", String(e)); }
     }
-    // The note used to reach a company only via the name search, which now
-    // never creates one. When the retailer's onboarding deal names real
-    // companies, put the note on those instead — a better association than the
-    // duplicate a create-on-miss used to produce.
+
+    // The note reaches a company by name match; when that missed but the
+    // onboarding deal named real companies, put it on those instead.
     if (noteId && !companyMatched && onboardingCompanyIds.length) {
       try {
         for (const cid of onboardingCompanyIds) {
-          await fetch(`https://api.hubapi.com/crm/v3/associations/Notes/Companies/batch/create`, {
+          await fetch(`${HUBSPOT_API}/crm/v3/associations/Notes/Companies/batch/create`, {
             method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
             body: JSON.stringify({ inputs: [{ from: { id: noteId }, to: { id: cid }, type: "note_to_company" }] }),
           });
@@ -1023,7 +1069,7 @@ async function getHubspotToken(env) {
     console.error("HubSpot credentials not configured");
     return null;
   }
-  const r = await fetch("https://api.hubapi.com/oauth/v1/token", {
+  const r = await fetch(`${HUBSPOT_API}/oauth/v1/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -1053,7 +1099,7 @@ async function upsertContact(token, p) {
   if (phone.startsWith("+")) props.phone = phone;   // HubSpot rejects unqualified numbers
   if (str(p.requester.country)) props.country = str(p.requester.country);
 
-  const search = () => fetch("https://api.hubapi.com/crm/v3/objects/contacts/search", {
+  const search = () => fetch(`${HUBSPOT_API}/crm/v3/objects/contacts/search`, {
     method: "POST", headers,
     body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: "email", operator: "EQ", value: email }] }] }),
   });
@@ -1062,14 +1108,14 @@ async function upsertContact(token, p) {
   const existing   = (searchJson.results || [])[0];
 
   if (existing) {
-    const patch = await fetch(`https://api.hubapi.com/crm/v3/objects/contacts/${existing.id}`, {
+    const patch = await fetch(`${HUBSPOT_API}/crm/v3/objects/contacts/${existing.id}`, {
       method: "PATCH", headers, body: JSON.stringify({ properties: props }),
     });
     if (!patch.ok) console.error("HubSpot contact PATCH failed", patch.status, await patch.text().catch(() => ""));
     return { id: existing.id, action: "updated" };
   }
 
-  const create     = await fetch("https://api.hubapi.com/crm/v3/objects/contacts", {
+  const create     = await fetch(`${HUBSPOT_API}/crm/v3/objects/contacts`, {
     method: "POST", headers, body: JSON.stringify({ properties: props }),
   });
   const createJson = await create.json().catch(() => ({}));
@@ -1087,7 +1133,7 @@ async function upsertContact(token, p) {
 }
 
 async function createNote(token, payload, documents, receivedAt, submissionId, bundle) {
-  const res = await fetch("https://api.hubapi.com/crm/v3/objects/notes", {
+  const res = await fetch(`${HUBSPOT_API}/crm/v3/objects/notes`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -1108,7 +1154,7 @@ async function linkEverything(token, noteId, contactId, companyName) {
   const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
   const assoc = (from, fromId, to, toId, type) =>
-    fetch(`https://api.hubapi.com/crm/v3/associations/${from}/${to}/batch/create`, {
+    fetch(`${HUBSPOT_API}/crm/v3/associations/${from}/${to}/batch/create`, {
       method: "POST", headers,
       body: JSON.stringify({ inputs: [{ from: { id: fromId }, to: { id: toId }, type }] }),
     }).catch(err => console.error("association failed", type, String(err)));
@@ -1117,7 +1163,7 @@ async function linkEverything(token, noteId, contactId, companyName) {
 
   // Any deals already on the contact.
   try {
-    const r = await fetch(`https://api.hubapi.com/crm/v3/objects/contacts/${contactId}/associations/deals`, { headers });
+    const r = await fetch(`${HUBSPOT_API}/crm/v3/objects/contacts/${contactId}/associations/deals`, { headers });
     if (r.ok) {
       for (const deal of (await r.json()).results || []) {
         await assoc("Notes", noteId, "Deals", deal.id, "note_to_deal");
@@ -1134,7 +1180,7 @@ async function linkEverything(token, noteId, contactId, companyName) {
   // every such account and hung the request on the duplicate instead of the
   // real record. No match is reported to Slack for a human to route.
   try {
-    const comps = await fetch("https://api.hubapi.com/crm/v3/objects/companies/search", {
+    const comps = await fetch(`${HUBSPOT_API}/crm/v3/objects/companies/search`, {
       method: "POST", headers,
       body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: "name", operator: "CONTAINS_TOKEN", value: companyName }] }] }),
     });
@@ -1147,7 +1193,7 @@ async function linkEverything(token, noteId, contactId, companyName) {
 
     await assoc("Contacts", contactId, "Companies", companyId, "contact_to_company");
     await assoc("Notes",    noteId,    "Companies", companyId, "note_to_company");
-    const deals = await fetch(`https://api.hubapi.com/crm/v3/objects/companies/${companyId}/associations/deals`, { headers });
+    const deals = await fetch(`${HUBSPOT_API}/crm/v3/objects/companies/${companyId}/associations/deals`, { headers });
     if (deals.ok) {
       for (const deal of (await deals.json()).results || []) {
         await assoc("Notes", noteId, "Deals", deal.id, "note_to_deal");
@@ -1501,7 +1547,15 @@ async function sendSlack(env, p, documents, contactId, submissionId, ctx = {}) {
     if (ctx.onboardingCompanyIds && ctx.onboardingCompanyIds.length) {
       blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `Companies: ${ctx.onboardingCompanyIds.map(id => `<${hsCoLink(id)}|${id}>`).join(", ")}` }] });
     }
-  } else if (scope === "Existing account" && retailer && retailerId) {
+  } else if (ctx.salesDealId) {
+    // A deal was created without an onboarding match: no owner was inherited,
+    // so it needs assigning by hand.
+    blocks.push({ type: "divider" });
+    blocks.push({ type: "section", text: { type: "mrkdwn", text:
+      `*CRM routing*\n-> New Sales 360: <${hsDealLink(ctx.salesDealId)}|${ctx.salesDealId}>  _Proposal Sent - USD 0_` +
+      `\n:warning: _No onboarding deal matched, so no owner was inherited - assign it and confirm the account._` }});
+  }
+  if (!ctx.onboardingDeal && scope === "Existing account" && retailer && retailerId) {
     blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `:warning: No onboarding deal in \`${HS.onboardingPipeline}\` matched Retailer \`${smk(retailerId)}\` — CSM to verify the retailer ID on the onboarding deal` }] });
   } else if (scope === "Existing account" && retailer) {
     // They typed the account name because the access sheet had no row for their
@@ -1816,7 +1870,7 @@ async function findOnboardingDealByRetailerId(token, retailerId) {
     properties: ["dealname","dealstage","pipeline", HS.retailerIdProp, "hubspot_owner_id", HS.accountOwnerProp, "amount", "deal_currency_code", "country", "dealtype"],
     limit: 1,
   };
-  const r = await fetch("https://api.hubapi.com/crm/v3/objects/deals/search", { method:"POST", headers, body: JSON.stringify(body) });
+  const r = await fetch(`${HUBSPOT_API}/crm/v3/objects/deals/search`, { method:"POST", headers, body: JSON.stringify(body) });
   if (!r.ok) { console.error("onboarding deal search failed", r.status, await r.text().catch(()=> "")); return null; }
   const j = await r.json().catch(()=> ({}));
   const hit = (j.results || [])[0];
@@ -1825,7 +1879,7 @@ async function findOnboardingDealByRetailerId(token, retailerId) {
 
 async function getDealCompanyIds(token, dealId) {
   const headers = { Authorization: `Bearer ${token}` };
-  const r = await fetch(`https://api.hubapi.com/crm/v3/objects/deals/${dealId}/associations/companies`, { headers });
+  const r = await fetch(`${HUBSPOT_API}/crm/v3/objects/deals/${dealId}/associations/companies`, { headers });
   if (!r.ok) return [];
   const j = await r.json().catch(()=> ({}));
   return (j.results || []).map(x => String(x.id));
@@ -1848,7 +1902,7 @@ async function createSalesDeal(token, props, companyIds, contactId) {
   // Strip undefined
   Object.keys(hsProps).forEach(k => hsProps[k] === undefined && delete hsProps[k]);
 
-  const r = await fetch("https://api.hubapi.com/crm/v3/objects/deals", {
+  const r = await fetch(`${HUBSPOT_API}/crm/v3/objects/deals`, {
     method:"POST", headers, body: JSON.stringify({ properties: hsProps }),
   });
   if (!r.ok) {
@@ -1866,7 +1920,7 @@ async function createSalesDeal(token, props, companyIds, contactId) {
 async function associateSalesDeal(token, dealId, companyIds, contactId, onboardingDealId) {
   const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
   const assoc = (from, fromId, to, toId, type) =>
-    fetch(`https://api.hubapi.com/crm/v3/associations/${from}/${to}/batch/create`, {
+    fetch(`${HUBSPOT_API}/crm/v3/associations/${from}/${to}/batch/create`, {
       method:"POST", headers, body: JSON.stringify({ inputs: [{ from:{id: fromId}, to:{id: toId}, type }] }),
     }).catch(e => console.error("sales assoc failed", type, String(e)));
   if (companyIds && companyIds.length) {
@@ -1885,7 +1939,7 @@ async function associateSalesDeal(token, dealId, companyIds, contactId, onboardi
   if (onboardingDealId) {
     try {
       const r = await fetch(
-        `https://api.hubapi.com/crm/v4/objects/deals/${dealId}/associations/default/deals/${onboardingDealId}`,
+        `${HUBSPOT_API}/crm/v4/objects/deals/${dealId}/associations/default/deals/${onboardingDealId}`,
         { method: "PUT", headers });
       if (!r.ok) console.error("deal_to_deal link failed", r.status, await r.text().catch(()=> ""));
       return r.ok;
