@@ -22,11 +22,23 @@ var REQUEST_HEADERS = [
   "Received", "Ref", "Account", "Contact", "Email", "Phone", "Country",
   "Sits under", "Existing account", "Retailer ID", "New account",
   "Outlets", "CK add-ons", "WH add-ons", "Cost centers", "Features",
-  "Same legal entity", "Billing entities", "Documents", "Notes", "Summary"
+  "Same legal entity", "Billing entities",
+  "Documents", "Docs uploaded", "Docs stored", "Zip bundle",
+  "Country manager", "HubSpot contact", "HubSpot deal", "Onboarding deal",
+  "HubSpot companies", "HubSpot note", "Delivery", "Notes", "Summary"
 ];
 
 var ITEM_HEADERS = [
   "Received", "Ref", "Account", "Kind", "Item", "Item ID", "Qty", "Bills under"
+];
+
+var ENTITY_HEADERS = [
+  "Received", "Ref", "Account", "Legal entity", "CRN / license", "TRN / VAT", "Documents"
+];
+
+var DOCUMENT_HEADERS = [
+  "Received", "Ref", "Account", "Legal entity", "Category", "Filename",
+  "Size (bytes)", "Stored", "Link", "Error"
 ];
 
 function doPost(e) {
@@ -37,8 +49,10 @@ function doPost(e) {
     }
 
     var ss = getLogSpreadsheet();
-    var requests = sheetFor(ss, "Requests", REQUEST_HEADERS);
-    var items    = sheetFor(ss, "Items",    ITEM_HEADERS);
+    var requests = sheetFor(ss, "Requests",  REQUEST_HEADERS);
+    var items    = sheetFor(ss, "Items",     ITEM_HEADERS);
+    var entitiesSheet  = sheetFor(ss, "Entities",  ENTITY_HEADERS);
+    var documentsSheet = sheetFor(ss, "Documents", DOCUMENT_HEADERS);
 
     // Re-posting the same submission must not double the rows. The Worker
     // retries on transient failure, and a duplicate row reads as a duplicate
@@ -61,7 +75,17 @@ function doPost(e) {
       d.scope || "", d.existingAccount || "", d.existingRetailerId || "", d.newAccount || "",
       d.outletCount || 0, d.ckAddonCount || 0, d.whAddonCount || 0,
       d.costCenterCount || 0, d.featureCount || 0,
-      d.sameLegalEntity || "", entities, docs, d.notes || "", d.summary || ""
+      d.sameLegalEntity || "", entities,
+      docs, d.documentCount || 0, d.documentsStored || 0,
+      d.bundleUrl ? (d.bundleFilename || "bundle") + " " + d.bundleUrl : "",
+      d.countryManager || "",
+      d.hubspotContactUrl || d.hubspotContactId || "",
+      d.hubspotDealUrl || d.hubspotDealId || "",
+      d.onboardingDealId || "",
+      d.hubspotCompanyIds || "",
+      d.hubspotNoteId || "",
+      d.deliveryResults || "",
+      d.notes || "", d.summary || ""
     ]);
 
     (d.rows || []).forEach(function (r) {
@@ -71,7 +95,29 @@ function doPost(e) {
       ]);
     });
 
-    return reply({ status: "ok", itemsAppended: (d.rows || []).length });
+    // One row per billing entity, and one per document, so nothing is squashed
+    // into a cell that has to be read by eye.
+    (d.entities || []).forEach(function (x) {
+      entitiesSheet.appendRow([
+        d.receivedAt || "", d.submissionId, d.account || "",
+        x.name || "", x.registrationNumber || "", x.trn || "", x.documents || ""
+      ]);
+    });
+
+    (d.documents || []).forEach(function (x) {
+      documentsSheet.appendRow([
+        d.receivedAt || "", d.submissionId, d.account || "",
+        x.entity || "", x.category || "", x.filename || "",
+        x.sizeBytes || 0, x.stored || "", x.url || "", x.error || ""
+      ]);
+    });
+
+    return reply({
+      status: "ok",
+      itemsAppended: (d.rows || []).length,
+      entitiesAppended: (d.entities || []).length,
+      documentsAppended: (d.documents || []).length
+    });
   } catch (err) {
     return reply({ status: "error", message: String(err) });
   }

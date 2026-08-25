@@ -488,7 +488,12 @@ async function handleWebhook(request, env, ctx) {
   }
 
   // 10. Google Sheets mirror.
-  const sheetsOk = await logToSheets(env, payload, documents, receivedAt, submissionId, bundle);
+  const sheetsOk = await logToSheets(env, payload, documents, receivedAt, submissionId, bundle, {
+    contactId, noteId, salesDealId,
+    onboardingDealId: onboardingDeal ? String(onboardingDeal.id) : "",
+    companyIds: onboardingCompanyIds,
+    results,
+  });
   results.push(sheetsOk ? "sheets:ok" : "sheets:fail");
 
   // 11. Log, best-effort and off the response path.
@@ -1959,7 +1964,7 @@ function formBaseUrl(env) {
 // the team working through what actually needs setting up. Both carry the same
 // submission ref so a row can be traced back to the CRM note.
 // ─────────────────────────────────────────────────────────────
-async function logToSheets(env, p, documents, receivedAt, submissionId, bundle) {
+async function logToSheets(env, p, documents, receivedAt, submissionId, bundle, crm = {}) {
   if (!env.GOOGLE_SCRIPT_URL) return false;
 
 
@@ -1997,15 +2002,38 @@ async function logToSheets(env, p, documents, receivedAt, submissionId, bundle) 
         costCenterCount:  unitsOf(p, "cost_center"),
         featureCount:     p.features.length,
         sameLegalEntity: p.billing.sameLegalEntity || "",
-        entities: p.billing.entities.map(e => ({
+        entities: p.billing.entities.map((e, i) => ({
           name: e.name, registrationNumber: e.registrationNumber || "", trn: e.trn || "",
+          // Every document this entity sent, so the Entities tab is readable on
+          // its own without cross-referencing.
+          documents: documents.filter(d => d.entityIndex === i)
+                              .map(d => `${d.category}: ${d.filename}${d.url ? " " + d.url : " (not stored)"}`)
+                              .join("\n"),
         })),
         documentCount:  documents.length,
         documentsStored: documents.filter(d => d.url).length,
         bundleUrl:      bundle && bundle.url ? bundle.url : "",
         bundleFilename: bundle ? bundle.filename : "",
-        documents: documents.map(d => ({ filename: d.filename, category: d.category, url: d.url || "" })),
+        documents: documents.map(d => ({
+          filename: d.filename, category: d.category, url: d.url || "",
+          sizeBytes: d.sizeBytes || 0,
+          entity: Number.isInteger(d.entityIndex) && p.billing.entities[d.entityIndex]
+            ? p.billing.entities[d.entityIndex].name : "",
+          stored: d.url ? "yes" : "no",
+          error: d.error || "",
+        })),
         notes: p.notes || "",
+        // Where the request ended up, so the sheet answers "was this actioned"
+        // without opening HubSpot.
+        countryManager: (managersForCountry(str(p.requester.country), env) || {}).countryManager || "",
+        hubspotContactId: crm.contactId || "",
+        hubspotContactUrl: crm.contactId ? `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-1/${crm.contactId}` : "",
+        hubspotDealId:  crm.salesDealId || "",
+        hubspotDealUrl: crm.salesDealId ? `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-3/${crm.salesDealId}` : "",
+        onboardingDealId: crm.onboardingDealId || "",
+        hubspotNoteId: crm.noteId || "",
+        hubspotCompanyIds: (crm.companyIds || []).join(", "),
+        deliveryResults: (crm.results || []).join(", "),
         rows,
       }),
     });

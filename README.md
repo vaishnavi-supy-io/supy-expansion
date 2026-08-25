@@ -47,7 +47,7 @@ Cloudflare Worker
      │                   Companies are matched, never created — see below
      ├─→ Slack           Block Kit summary with document + HubSpot buttons
      ├─→ Gmail           internal notification + client receipt
-     ├─→ Sheets          Requests row + one Items row per outlet/feature line
+     ├─→ Sheets          Requests + Items + Entities + Documents - the whole record
      └─→ KV              draft storage, submission log, idempotency record
 ```
 
