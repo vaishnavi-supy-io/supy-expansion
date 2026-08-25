@@ -1235,17 +1235,36 @@ function esc(s) {
 }
 
 const H4 = "color:#503390;border-bottom:1px solid #e0d8f0;padding-bottom:4px;margin:14px 0 8px";
-const TD = "padding:5px 8px;border-bottom:1px solid #eee;vertical-align:top";
-const TH = "padding:6px 8px;text-align:left";
+// One type stack and one set of cell metrics for every table in the note, so
+// the sections line up with each other instead of each looking hand-made.
+const FONT  = "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif";
+const TABLE = `border-collapse:collapse;width:100%;font-size:13px;margin:0 0 4px;${FONT}`;
+const TD    = "padding:7px 10px;border-bottom:1px solid #ecebf1;vertical-align:top;line-height:1.5";
+const TH    = "padding:7px 10px;text-align:left;font-weight:600;font-size:11px;letter-spacing:.4px;text-transform:uppercase";
 
+// headers may carry an alignment: "Qty|right". Numbers right, words left, so
+// quantities stack under each other and can be read down the column.
 function table(headers, rows) {
-  if (!rows.length) return "<i>None.</i>";
-  const head = headers.map(h => `<th style='${TH}'>${esc(h)}</th>`).join("");
-  const body = rows.map(cells =>
-    `<tr>${cells.map(c => `<td style='${TD}'>${c}</td>`).join("")}</tr>`
-  ).join("");
-  return `<table style='border-collapse:collapse;width:100%;font-size:12px'>` +
-         `<tr style='background:#321e57;color:#fff'>${head}</tr>${body}</table>`;
+  if (!rows.length) return "<p style='color:#8b8b9a;font-size:13px;margin:0 0 4px'>None.</p>";
+  const align = headers.map(h => (String(h).split("|")[1] || "left"));
+  const head  = headers.map((h, i) =>
+    `<th style='${TH};text-align:${align[i]}'>${esc(String(h).split("|")[0])}</th>`).join("");
+  const body  = rows.map((cells, n) =>
+    `<tr style='background:${n % 2 ? "#faf9fc" : "#fff"}'>` +
+    cells.map((c, i) => `<td style='${TD};text-align:${align[i]}'>${c}</td>`).join("") +
+    `</tr>`).join("");
+  return `<table style='${TABLE}'><tr style='background:#321e57;color:#fff'>${head}</tr>${body}</table>`;
+}
+
+// Label/value pairs as a table too, so every left edge in the note is the same
+// left edge.
+function kv(pairs) {
+  const rows = pairs.filter(Boolean).map(([k, v]) =>
+    `<tr>` +
+    `<td style='${TD};width:170px;color:#6b6b7b;border-bottom:1px solid #f4f3f7'>${esc(k)}</td>` +
+    `<td style='${TD};border-bottom:1px solid #f4f3f7'>${v}</td>` +
+    `</tr>`).join("");
+  return `<table style='${TABLE}'>${rows}</table>`;
 }
 
 function buildNote(p, documents, receivedAt, submissionId, bundle) {
