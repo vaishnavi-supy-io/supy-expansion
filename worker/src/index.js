@@ -172,6 +172,14 @@ function json(data, status, request, env) {
 // Entry
 // ─────────────────────────────────────────────────────────────
 export default {
+  // Anything the sheet missed while Apps Script was down gets replayed here.
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil((async () => {
+      const r = await drainSheetsQueue(env, 100);
+      if (r.sent || r.pending) console.log("sheets queue drained", JSON.stringify(r));
+    })());
+  },
+
   async fetch(request, env, ctx) {
     if (env.HUBSPOT_API_BASE) HUBSPOT_API = String(env.HUBSPOT_API_BASE).replace(/\/$/, "");
     const url = new URL(request.url);
@@ -204,6 +212,12 @@ export default {
       }
       if (url.pathname === "/geo" && request.method === "GET") {
         return handleGeo(request, env);
+      }
+      if (url.pathname === "/sheets/retry") {
+        if (!env.ADMIN_TOKEN || request.headers.get("x-admin-token") !== env.ADMIN_TOKEN) {
+          return json({ error: "Unauthorized" }, 401, request, env);
+        }
+        return json(await drainSheetsQueue(env), 200, request, env);
       }
       if (url.pathname === "/logs" && request.method === "GET") {
         return await handleLogs(request, env);
@@ -1979,11 +1993,7 @@ async function logToSheets(env, p, documents, receivedAt, submissionId, bundle, 
       billsUnder: a.billsUnder && a.billsUnder !== DEFAULT_ENTITY ? a.billsUnder : "Existing account entity",
     })));
 
-  try {
-    const res = await fetch(env.GOOGLE_SCRIPT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+  const body = {
         submissionId,
         receivedAt,
         summary:      buildSubject(p),
@@ -2035,14 +2045,70 @@ async function logToSheets(env, p, documents, receivedAt, submissionId, bundle, 
         hubspotCompanyIds: (crm.companyIds || []).join(", "),
         deliveryResults: (crm.results || []).join(", "),
         rows,
-      }),
-    });
-    if (!res.ok) console.error("Sheets append failed", res.status);
-    return res.ok;
-  } catch (err) {
-    console.error("Sheets append threw", String(err));
-    return false;
+  };
+
+  const sent = await postToSheets(env, body);
+  if (!sent) await queueForSheets(env, body);
+  return sent;
+}
+
+// ─────────────────────────────────────────────────────────────
+// The sheet is meant to hold every response, so a failed append is a queued
+// one, not a lost one. Apps Script goes down, times out and hits quotas; none
+// of that should leave a hole in the record.
+// ─────────────────────────────────────────────────────────────
+const SHEETS_TIMEOUT_MS = 15000;
+const SHEETS_QUEUE_PREFIX = "sheetq:";
+
+async function postToSheets(env, body, attempts = 2) {
+  if (!env.GOOGLE_SCRIPT_URL) return false;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await fetch(env.GOOGLE_SCRIPT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(SHEETS_TIMEOUT_MS),
+      });
+      if (res.ok) return true;
+      console.error("Sheets append failed", res.status);
+    } catch (err) {
+      console.error("Sheets append threw", String(err));
+    }
   }
+  return false;
+}
+
+async function queueForSheets(env, body) {
+  if (!env.LOGS) return;
+  try {
+    await env.LOGS.put(`${SHEETS_QUEUE_PREFIX}${body.receivedAt}:${body.submissionId}`,
+      JSON.stringify(body), { expirationTtl: 60 * 60 * 24 * 30 });
+    console.error("queued for the sheet", body.submissionId);
+  } catch (err) { console.error("could not queue for the sheet", String(err)); }
+}
+
+// Replays what is queued. Runs on a schedule, and on demand via /sheets/retry.
+// Apps Script's own idempotency guard makes a double send harmless.
+async function drainSheetsQueue(env, limit = 50) {
+  if (!env.LOGS || !env.GOOGLE_SCRIPT_URL) return { sent: 0, failed: 0, pending: 0 };
+  let sent = 0, failed = 0;
+  const list = await env.LOGS.list({ prefix: SHEETS_QUEUE_PREFIX, limit });
+  for (const key of list.keys) {
+    const raw = await env.LOGS.get(key.name);
+    if (!raw) continue;
+    let body;
+    try { body = JSON.parse(raw); } catch { await env.LOGS.delete(key.name); continue; }
+    if (await postToSheets(env, body, 1)) {
+      await env.LOGS.delete(key.name);
+      sent++;
+    } else {
+      failed++;
+      break;   // still down: stop hammering, the rest keeps until next time
+    }
+  }
+  const rest = await env.LOGS.list({ prefix: SHEETS_QUEUE_PREFIX, limit: 1000 });
+  return { sent, failed, pending: rest.keys.length };
 }
 
 // ─────────────────────────────────────────────────────────────

@@ -7,6 +7,10 @@ compatibility_date = "2024-09-23"
 # the Worker accepts any origin, which is fine while testing and not fine once
 # the endpoint is creating CRM records.
 # PUBLIC_BASE_URL is this Worker's own origin, used to build /download links.
+# Replays anything the Sheets mirror missed while Apps Script was unavailable.
+[triggers]
+crons = ["*/15 * * * *"]
+
 [vars]
 ALLOWED_ORIGINS = "https://vaishnavi-supy-io.github.io"
 PUBLIC_BASE_URL = "https://supy-expansion.vaishnavi-5d1.workers.dev"

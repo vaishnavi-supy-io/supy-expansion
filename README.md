@@ -137,6 +137,7 @@ it validates and renders the payload instead of sending it.
 | `GET /account/prefill?key=` | prefill key | That account's outlets, for the picklists. |
 | `GET /download?key=&name=` | none | Streams a stored document. Keys outside `supy-expansion/` are refused. |
 | `GET /logs` | `x-admin-token` | Last 200 submissions. |
+| `GET /sheets/retry` | `x-admin-token` | Replays anything the Sheets mirror missed. Also runs every 15 minutes. |
 | `GET /debug` | `x-admin-token` | Which secrets are present. Booleans only. |
 | `GET /` | none | Health check. |
 
