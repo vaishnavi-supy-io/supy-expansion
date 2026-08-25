@@ -1,10 +1,10 @@
 /**
- * Supy Expansion Request — Google Sheets receiver
+ * Supy Expansion Request - Google Sheets receiver
  *
  * Setup:
  *   1. Create a spreadsheet.
- *   2. Extensions → Apps Script, paste this in, save.
- *   3. Deploy → New deployment → Web app.
+ *   2. Extensions -> Apps Script, paste this in, save.
+ *   3. Deploy -> New deployment -> Web app.
  *        Execute as:      Me
  *        Who has access:  Anyone
  *      "Anyone" is what lets the Worker POST without a Google login. The URL is
@@ -13,8 +13,8 @@
  *   4. Copy the deployment URL into the Worker secret above.
  *
  * Writes two sheets:
- *   Requests — one row per submission, for tracking
- *   Items    — one row per allocation line, so a product split across two
+ *   Requests - one row per submission, for tracking
+ *   Items    - one row per allocation line, so a product split across two
  *              entities becomes two rows, for whoever provisions it
  */
 
@@ -48,7 +48,7 @@ function doPost(e) {
     }
 
     var entities = (d.entities || []).map(function (x) {
-      return x.name + " (CRN " + (x.registrationNumber || "—") + ", TRN " + (x.trn || "—") + ")";
+      return x.name + " (CRN " + (x.registrationNumber || "-") + ", TRN " + (x.trn || "-") + ")";
     }).join("\n");
 
     var docs = (d.documents || []).map(function (x) {
@@ -80,7 +80,7 @@ function doPost(e) {
 var DATA_SPREADSHEET_ID = "1raBGqWqxVaUcraY0gjR-CFQT3T2_TheemPfOpihmmFE";
 var DATA_SHEET_GID = 599203487;
 // Where Requests/Items are written. Leave null to use the spreadsheet this script is bound to.
-// IMPORTANT: Do NOT set this to the Data sheet — it refreshes daily and wipes your writes.
+// IMPORTANT: Do NOT set this to the Data sheet - it refreshes daily and wipes your writes.
 var LOG_SPREADSHEET_ID = null; // e.g. "1AbC...logSheetId"
 var ACCESS_SPREADSHEET_ID = DATA_SPREADSHEET_ID;
 var ACCESS_SHEET_GID = DATA_SHEET_GID;
@@ -112,9 +112,9 @@ function doGet(e) {
       if (!sh) sh = ss.getSheetByName("Access");
       if (!sh) sh = ss.getSheets()[0];
       if (!sh) return reply({ retailers: [] });
-      // The directory is one row per user × outlet × location and runs to
+      // The directory is one row per user x outlet x location and runs to
       // several megabytes, so getDataRange().getValues() pulls hundreds of
-      // thousands of cells on every keystroke's worth of lookup — that is what
+      // thousands of cells on every keystroke's worth of lookup - that is what
       // was timing the Worker out. TextFinder searches server-side and returns
       // only the matching cells, and the answer is cached per email.
       var want = String(email).trim().toLowerCase();
