@@ -225,6 +225,23 @@ export default {
       if (url.pathname === "/debug" && request.method === "GET") {
         return handleDebug(request, env);
       }
+      // Whether the Sheets mirror is configured, and with what host - never the
+      // URL itself, which is a bearer credential. Guessing at this from
+      // response timings is how an empty secret and a malformed one came to
+      // look identical for three rounds of debugging.
+      if (url.pathname === "/health") {
+        let sheets = "unset";
+        if (env.GOOGLE_SCRIPT_URL) {
+          try { sheets = new URL(env.GOOGLE_SCRIPT_URL).host; }
+          catch { sheets = `invalid (${env.GOOGLE_SCRIPT_URL.length} chars, not a URL)`; }
+        }
+        let queued = null;
+        if (env.LOGS) {
+          try { queued = (await env.LOGS.list({ prefix: SHEETS_QUEUE_PREFIX, limit: 1000 })).keys.length; }
+          catch { /* not fatal */ }
+        }
+        return json({ ok: true, sheets, queuedForSheets: queued, admin: Boolean(env.ADMIN_TOKEN) }, 200, request, env);
+      }
       if (url.pathname === "/") {
         return new Response("Supy Expansion Request: Online", {
           status: 200, headers: corsHeaders(request, env),
@@ -502,13 +519,18 @@ async function handleWebhook(request, env, ctx) {
   }
 
   // 10. Google Sheets mirror.
-  const sheetsOk = await logToSheets(env, payload, documents, receivedAt, submissionId, bundle, {
+  const sheets = await logToSheets(env, payload, documents, receivedAt, submissionId, bundle, {
     contactId, noteId, salesDealId,
     onboardingDealId: onboardingDeal ? String(onboardingDeal.id) : "",
     companyIds: onboardingCompanyIds,
     results,
   });
-  results.push(sheetsOk ? "sheets:ok" : "sheets:fail");
+  // Naming the spreadsheet is the point: "wrote successfully, to the wrong
+  // spreadsheet" is otherwise indistinguishable from "wrote successfully", and
+  // that is precisely how a stale deployment stayed invisible for two days.
+  results.push(sheets.ok
+    ? (sheets.spreadsheetId ? `sheets:ok:${sheets.spreadsheetId.slice(0, 8)}` : "sheets:ok")
+    : "sheets:fail");
 
   // 11. Log, best-effort and off the response path.
   const logLine = `${receivedAt} | ${submissionId} | ${payload.requester.email} | ${account} | ${results.join(",")}`;
@@ -1987,7 +2009,6 @@ function formBaseUrl(env) {
 // submission ref so a row can be traced back to the CRM note.
 // ─────────────────────────────────────────────────────────────
 async function logToSheets(env, p, documents, receivedAt, submissionId, bundle, crm = {}) {
-  if (!env.GOOGLE_SCRIPT_URL) return false;
 
 
   // One row per allocation, so a line split across two entities becomes two
@@ -2055,8 +2076,16 @@ async function logToSheets(env, p, documents, receivedAt, submissionId, bundle, 
         rows,
   };
 
-  const sent = await postToSheets(env, body);
-  if (!sent) await queueForSheets(env, body);
+  // No receiver configured is not a reason to lose the row - it is queued and
+  // the cron replays it once one exists. An empty secret is easy to create by
+  // accident, because `wrangler secret put` reports success for an empty prompt
+  // and the input is hidden, and dropping every row silently until someone
+  // notices is far worse than holding them for 30 days.
+  const sent = env.GOOGLE_SCRIPT_URL ? await postToSheets(env, body) : false;
+  if (!sent) {
+    await queueForSheets(env, body);
+    return { ok: false, spreadsheetId: "" };
+  }
   return sent;
 }
 
@@ -2078,8 +2107,22 @@ async function postToSheets(env, body, attempts = 2) {
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(SHEETS_TIMEOUT_MS),
       });
-      if (res.ok) return true;
-      console.error("Sheets append failed", res.status);
+      if (res.ok) {
+        // Apps Script answers 200 to everything - its own thrown exceptions,
+        // and the sign-in page a wrongly-shared deployment serves. Only the
+        // receiver's own {status:"ok"} counts as written, or the mirror reports
+        // success for rows that never landed and the retry queue never fires.
+        const text = (await res.text()).slice(0, 500);
+        let parsed = null;
+        try { parsed = JSON.parse(text); } catch { /* not the receiver */ }
+        if (parsed && parsed.status === "ok") {
+          return { ok: true, spreadsheetId: String(parsed.spreadsheetId || "") };
+        }
+        console.error("Sheets append rejected",
+          parsed ? String(parsed.message || text) : `non-JSON body: ${text}`);
+      } else {
+        console.error("Sheets append failed", res.status);
+      }
     } catch (err) {
       console.error("Sheets append threw", String(err));
     }

@@ -12,10 +12,17 @@
  *      `wrangler secret put GOOGLE_SCRIPT_URL` rather than committing it.
  *   4. Copy the deployment URL into the Worker secret above.
  *
- * Writes two sheets:
- *   Requests - one row per submission, for tracking
- *   Items    - one row per allocation line, so a product split across two
- *              entities becomes two rows, for whoever provisions it
+ * Writes four sheets:
+ *   Requests  - one row per submission, for tracking
+ *   Items     - one row per allocation line, so a product split across two
+ *               entities becomes two rows, for whoever provisions it
+ *   Entities  - one row per billing entity
+ *   Documents - one row per uploaded document
+ *
+ * Rows are written to LOG_SPREADSHEET_ID below, not to whatever spreadsheet
+ * this script happens to be bound to. After editing this file, Deploy ->
+ * Manage deployments -> edit -> New version, or the running web app keeps
+ * serving the old code.
  */
 
 var REQUEST_HEADERS = [
@@ -58,7 +65,7 @@ function doPost(e) {
     // retries on transient failure, and a duplicate row reads as a duplicate
     // request to whoever is working the sheet.
     if (alreadyLogged(requests, d.submissionId)) {
-      return reply({ status: "ok", duplicate: true });
+      return reply({ status: "ok", duplicate: true, spreadsheetId: ss.getId() });
     }
 
     var entities = (d.entities || []).map(function (x) {
@@ -112,8 +119,12 @@ function doPost(e) {
       ]);
     });
 
+    // The Worker records this id alongside sheets:ok, so a request that was
+    // written to the wrong spreadsheet says so in the response instead of
+    // looking identical to a healthy one.
     return reply({
       status: "ok",
+      spreadsheetId: ss.getId(),
       itemsAppended: (d.rows || []).length,
       entitiesAppended: (d.entities || []).length,
       documentsAppended: (d.documents || []).length
@@ -134,12 +145,22 @@ var ACCESS_SHEET_GID = DATA_SHEET_GID;
 function getLogSpreadsheet() {
   var ss = null;
   if (LOG_SPREADSHEET_ID) {
-    try { ss = SpreadsheetApp.openById(LOG_SPREADSHEET_ID); } catch (err) {}
+    // Falling back to the bound spreadsheet here is what hid the problem for
+    // two days: rows kept appending to whatever this script happens to live
+    // in, while LOG_SPREADSHEET_ID sat empty and every submission still
+    // reported the mirror as healthy. If the named spreadsheet cannot be
+    // opened, say so.
+    try {
+      ss = SpreadsheetApp.openById(LOG_SPREADSHEET_ID);
+    } catch (err) {
+      throw new Error("Cannot open LOG_SPREADSHEET_ID " + LOG_SPREADSHEET_ID + ": " + String(err));
+    }
+  } else {
+    ss = SpreadsheetApp.getActiveSpreadsheet();
   }
-  if (!ss) ss = SpreadsheetApp.getActiveSpreadsheet();
-  // Guard: never write to the Data codebase sheet
-  try { if (ss.getId() === DATA_SPREADSHEET_ID) throw new Error("Refusing to write to Data sheet"); } catch (err) {
-    throw new Error("LOG_SPREADSHEET_ID must be a different spreadsheet than the Data codebase sheet. Create a new spreadsheet for Requests/Items and set its ID in LOG_SPREADSHEET_ID, or bind this script to that log spreadsheet.");
+  // The directory refreshes daily and would wipe anything written into it.
+  if (ss.getId() === DATA_SPREADSHEET_ID) {
+    throw new Error("Refusing to write to the retailer directory. Point LOG_SPREADSHEET_ID at a spreadsheet of our own.");
   }
   return ss;
 }
@@ -245,9 +266,19 @@ function parseBody(e) {
 function sheetFor(ss, name, headers) {
   var sheet = ss.getSheetByName(name);
   if (!sheet) sheet = ss.insertSheet(name);
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow(headers);
-    sheet.getRange(1, 1, 1, headers.length)
+
+  // A new sheet is 26 columns wide and Requests is 31, and appendRow throws
+  // when the row is wider than the grid. Left unwidened, every append fails -
+  // and because Apps Script returns 200 with the error in the body, the Worker
+  // would report the mirror healthy while nothing was ever written.
+  var grid = sheet.getMaxColumns();
+  if (grid < headers.length) sheet.insertColumnsAfter(grid, headers.length - grid);
+
+  // A tab left by an earlier version of this script carries a shorter header.
+  // Rewriting it labels the new columns; the rows already there keep the
+  // columns they were written with.
+  if (sheet.getLastRow() === 0 || sheet.getLastColumn() < headers.length) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers])
          .setFontWeight("bold").setBackground("#321e57").setFontColor("#ffffff");
     sheet.setFrozenRows(1);
   }

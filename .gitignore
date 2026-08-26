@@ -8,3 +8,8 @@ node_modules/
 
 .DS_Store
 *.log
+
+# One-time handoff file for the Apps Script URL. Never committed.
+worker/.sheeturl
+# Generated ADMIN_TOKEN, kept out of git.
+worker/.admin-token
