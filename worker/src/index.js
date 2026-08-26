@@ -100,6 +100,8 @@ const HS = {
   accountOwnerProp:   "account_owner",   // labelled "Account Manager"
   retailerIdProp:     "retailer_id",
   branchesProp:       "number_of_locations",  // labelled "Number of branches"
+  dealSourceProp:     "new_deal_source",      // labelled "NEW Deal Source"
+  dealSourceClient:   "Client",               // one of Sales|Marketing|Partnership|Client|Referral
 };
 
 // Country → Slack mention. Override via env COUNTRY_MANAGERS_JSON = JSON string
@@ -1994,7 +1996,11 @@ async function getDealCompanyIds(token, dealId) {
 
 async function createSalesDeal(token, props, companyIds, contactId) {
   const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
-  // HubSpot: dealtype existingbusiness = Live/Existing Customer (spec's Deal Source). No separate deal_source property exists in this portal (checked via API), so we set dealtype only. hs_analytics_source is read-only and would fail.
+  // HubSpot: dealtype existingbusiness = Live/Existing Customer. There is now a
+  // real "NEW Deal Source" property in the portal - there was not when this was
+  // written - and every request here comes from the client filling in the form,
+  // so it is Client rather than Sales or Marketing. hs_analytics_source stays
+  // untouched: it is read-only and setting it fails the whole create.
   const hsProps = {
     dealname: props.dealname,
     pipeline: props.pipeline,
@@ -2009,6 +2015,7 @@ async function createSalesDeal(token, props, companyIds, contactId) {
     // labelled "Number of branches", and a 0 there reads as "this customer has
     // no branches" rather than "this request added none".
     [HS.branchesProp]: props.branches ? String(props.branches) : undefined,
+    [HS.dealSourceProp]: HS.dealSourceClient,
   };
   // Strip undefined
   Object.keys(hsProps).forEach(k => hsProps[k] === undefined && delete hsProps[k]);
