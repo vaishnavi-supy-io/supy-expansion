@@ -1754,7 +1754,7 @@ function applyGates(){
    PROGRESS, SAVED AS THEY GO
    Long forms get interrupted. Everything except the uploaded files is written
    to this browser after each change and restored on the next visit — files are
-   deliberately excluded, because a trade licence sitting in local storage is a
+   deliberately excluded, because a trade license sitting in local storage is a
    worse trade than asking for it again.
    ============================================================ */
 const DRAFT_KEY = 'supy-expansion-progress-v1';
@@ -1871,7 +1871,7 @@ document.addEventListener('click',  () => setTimeout(() => { applyGates(); saveP
 /* A resume link, for picking the form up on another device or after a gap.
    The browser copy above covers the same machine; this covers everything else.
    Documents are excluded here too — the key in the URL is the only thing
-   guarding it, so it must not open a customer's trade licence. */
+   guarding it, so it must not open a customer's trade license. */
 let serverDraftKey = new URLSearchParams(location.search).get('draft') || '';
 
 async function saveDraftToServer(){

@@ -2,7 +2,7 @@
 
 Self-service expansion request form for existing Supy clients, plus the Cloudflare
 Worker that receives it. A client picks what they want to add from a catalogue —
-outlet licences, CK and WH add-ons, extra cost centers, and features — sets a
+outlet licenses, CK and WH add-ons, extra cost centers, and features — sets a
 quantity for each, and splits any line across billing entities. The request
 arrives structured and attached to the right CRM record, instead of as an email
 thread someone has to unpick.

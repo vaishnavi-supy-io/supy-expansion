@@ -958,7 +958,7 @@ function buildZip(entries, when = new Date()) {
 }
 
 // Documents inside the archive are named by entity and category, so two
-// entities that both uploaded "licence.pdf" do not collide.
+// entities that both uploaded "license.pdf" do not collide.
 function zipEntryName(f, i) {
   const safe = String(f.name || "document").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
   const ent  = Number.isInteger(f.entityIndex) ? `entity-${f.entityIndex + 1}` : "entity";
@@ -1526,7 +1526,7 @@ const pad = (v, n) => { const t = String(v); return t.length > n ? t.slice(0, n 
 // The catalogue names are written for the form, where there is room. In a
 // Slack table they only need to be recognisable.
 const SHORT_ITEM = {
-  outlet:       "Outlet licence",
+  outlet:       "Outlet license",
   ck_addon:     "CK add-on",
   wh_addon:     "WH add-on",
   cost_center:  "Cost center",
