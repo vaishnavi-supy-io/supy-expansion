@@ -1674,52 +1674,33 @@ function shortEntity(name) {
 }
 
 // Deal names live on a board card, where only the first ~40 characters are
-// visible, so the account and date lead and the items follow. The catalogue's
-// full labels are far too long for this - "Outlet (Back of House License)"
-// alone is 30 characters - so each has a short form used only here.
-const SHORT_LABELS = {
-  outlet:       "Outlet",
-  ck_addon:     "CK",
-  wh_addon:     "WH",
-  cost_center:  "Cost center",
-  accounting:   "Accounting",
-  invoiceinbox: "AI Inbox",
-};
-const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-const DEAL_NAME_LIMIT = 160;
+// visible. The account and date lead, then what the request is for. Line items
+// are deliberately collapsed: which add-on or which feature is a question the
+// note, the Slack table and the sheet all answer properly, and spelling it out
+// here only pushed the account name off the card.
+const MONTHS_FULL = ["January","February","March","April","May","June",
+                     "July","August","September","October","November","December"];
+const ADDON_IDS = PRODUCT_IDS.filter(id => id !== "outlet");
 
-// Not buildSubject: that repeats the account name, which a deal name already
-// carries, and it is the right shape for an email subject line rather than a
-// board card. The date is what keeps a second expansion from the same account
-// from looking like a duplicate of the first.
 function buildDealName(p, receivedAt) {
   const account = str(p.requester.account) || "Account";
   const d = new Date(receivedAt);
   const head = Number.isNaN(d.getTime())
-    ? `${account} — Expansion`
-    : `${account} — Expansion ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+    ? account
+    : `${account} — ${MONTHS_FULL[d.getUTCMonth()]} ${d.getUTCDate()}`;
 
-  const items = p.lines
-    .map(l => ({ id: str(l.id), name: str(l.name), qty: unitsOf(p, str(l.id)) }))
-    .filter(x => x.qty > 0)
-    .map(x => `${x.qty} ${SHORT_LABELS[x.id] || CATALOGUE[x.id] || x.name || x.id}`);
-  if (!items.length) return head;
+  const branches   = unitsOf(p, "outlet");
+  const hasAddon   = ADDON_IDS.some(id => unitsOf(p, id) > 0);
+  const hasFeature = p.lines.some(l => !PRODUCT_IDS.includes(str(l.id)) && unitsOf(p, str(l.id)) > 0);
 
-  // Truncate on an item boundary and say how many were dropped, rather than
-  // slicing mid-word the way the old name did - "1 Outlet (Back of Hou" told
-  // whoever read the board nothing and looked broken.
-  const kept = [];
-  let used = head.length + 2;
-  for (let i = 0; i < items.length; i++) {
-    const sep = kept.length ? 2 : 0;
-    if (used + sep + items[i].length > DEAL_NAME_LIMIT) {
-      kept.push(`+${items.length - i} more`);
-      break;
-    }
-    used += sep + items[i].length;
-    kept.push(items[i]);
-  }
-  return `${head}: ${kept.join(", ")}`;
+  // A category the request did not ask for is left out rather than written as
+  // zero, so the name says what was ordered and nothing else.
+  const parts = [];
+  if (branches > 0) parts.push(`${branches} ${branches === 1 ? "branch" : "branches"}`);
+  if (hasAddon)     parts.push("add ons");
+  if (hasFeature)   parts.push("services and features");
+
+  return parts.length ? `${head}: ${parts.join(", ")}` : head;
 }
 
 function buildSubject(p) {
