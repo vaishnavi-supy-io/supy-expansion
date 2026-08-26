@@ -64,6 +64,10 @@ const LIMITS = {
 };
 
 const DEFAULT_ENTITY = "Our existing account entity";
+// How the default entity is described wherever a human reads it. "account
+// entity" invited the question "which account?"; the point is that the line
+// bills where the customer's existing lines already bill.
+const DEFAULT_ENTITY_LABEL = "Existing billing entity";
 
 // HubSpot's deal "country" property is an enumeration, and nine of the names in
 // the form's list are not options in it. Writing an unlisted value silently
@@ -1301,7 +1305,8 @@ function buildNote(p, documents, receivedAt, submissionId, bundle) {
     const allocs = Array.isArray(l.allocations) ? l.allocations : [];
     const qty = allocs.reduce((n, a) => n + (Number(a.quantity) || 0), 0);
     const split = allocs.length
-      ? allocs.map(a => `${esc(a.quantity)} &times; ${esc(a.billsUnder || DEFAULT_ENTITY)}`).join("<br>")
+      ? allocs.map(a => `${esc(a.quantity)} &times; ${esc(
+          a.billsUnder && a.billsUnder !== DEFAULT_ENTITY ? a.billsUnder : DEFAULT_ENTITY_LABEL)}`).join("<br>")
       : dash;
     return [
       esc(CATALOGUE[str(l.id)] || l.name || l.id),
@@ -1568,7 +1573,7 @@ async function sendSlack(env, p, documents, contactId, submissionId, ctx = {}) {
     const split = allocs.length > 1
       ? allocs.map(a => `${a.quantity} ${shortEntity(a.billsUnder)}`).join(", ")
       : (allocs[0] && allocs[0].billsUnder && allocs[0].billsUnder !== DEFAULT_ENTITY
-          ? shortEntity(allocs[0].billsUnder) : "account entity");
+          ? shortEntity(allocs[0].billsUnder) : DEFAULT_ENTITY_LABEL.toLowerCase());
     return `${String(qty).padStart(3)}   ${pad(name, 22)}  ${split}`;
   }).join("\n");
 
@@ -1662,7 +1667,7 @@ async function sendSlack(env, p, documents, contactId, submissionId, ctx = {}) {
 // "Marina Hospitality LLC" -> "Marina Hospitality", so the table column holds.
 function shortEntity(name) {
   const n = str(name);
-  if (!n || n === DEFAULT_ENTITY) return "account entity";
+  if (!n || n === DEFAULT_ENTITY) return DEFAULT_ENTITY_LABEL.toLowerCase();
   return n.replace(/\s+(LLC|L\.L\.C\.?|FZE|FZ-?LLC|WLL|Ltd\.?|Limited|Co\.?|Company|Trading|Holdings?)$/i, "").slice(0, 24);
 }
 
@@ -2076,7 +2081,7 @@ async function logToSheets(env, p, documents, receivedAt, submissionId, bundle, 
       name:       CATALOGUE[str(l.id)] || str(l.name) || str(l.id),
       kind:       PRODUCT_IDS.includes(str(l.id)) ? "Product" : "Feature",
       quantity:   Number(a.quantity) || 0,
-      billsUnder: a.billsUnder && a.billsUnder !== DEFAULT_ENTITY ? a.billsUnder : "Existing account entity",
+      billsUnder: a.billsUnder && a.billsUnder !== DEFAULT_ENTITY ? a.billsUnder : DEFAULT_ENTITY_LABEL,
     })));
 
   const body = {
