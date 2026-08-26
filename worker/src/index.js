@@ -95,6 +95,7 @@ const HS = {
   handoffStage:       "1091553684",
   accountOwnerProp:   "account_owner",   // labelled "Account Manager"
   retailerIdProp:     "retailer_id",
+  branchesProp:       "number_of_locations",  // labelled "Number of branches"
 };
 
 // Country → Slack mention. Override via env COUNTRY_MANAGERS_JSON = JSON string
@@ -421,7 +422,7 @@ async function handleWebhook(request, env, ctx) {
       : (matchedCompanyId ? [matchedCompanyId] : []);
 
     const countryForDeal = hsCountry(payload.requester.country) || str(payload.requester.country) || "";
-    const dealName = `${str(payload.requester.account) || "Account"} — Expansion: ${buildSubject(payload).slice(0, 80)}`;
+    const dealName = buildDealName(payload, receivedAt);
 
     try {
       const created = await createSalesDeal(token, {
@@ -436,6 +437,9 @@ async function handleWebhook(request, env, ctx) {
         dealtype: scopeTarget === "New account" ? "newbusiness" : "existingbusiness",
         country: countryForDeal || undefined,
         retailerId: retailerId || undefined,
+        // Outlets ordered, summed across every entity the line is split over,
+        // so a 1+2 split across two entities reaches HubSpot as 3.
+        branches: unitsOf(payload, "outlet"),
         onboardingDealId: onboardingDeal ? String(onboardingDeal.id) : undefined,
       }, companyIds, contactId);
 
@@ -1662,6 +1666,55 @@ function shortEntity(name) {
   return n.replace(/\s+(LLC|L\.L\.C\.?|FZE|FZ-?LLC|WLL|Ltd\.?|Limited|Co\.?|Company|Trading|Holdings?)$/i, "").slice(0, 24);
 }
 
+// Deal names live on a board card, where only the first ~40 characters are
+// visible, so the account and date lead and the items follow. The catalogue's
+// full labels are far too long for this - "Outlet (Back of House License)"
+// alone is 30 characters - so each has a short form used only here.
+const SHORT_LABELS = {
+  outlet:       "Outlet",
+  ck_addon:     "CK",
+  wh_addon:     "WH",
+  cost_center:  "Cost center",
+  accounting:   "Accounting",
+  invoiceinbox: "AI Inbox",
+};
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const DEAL_NAME_LIMIT = 160;
+
+// Not buildSubject: that repeats the account name, which a deal name already
+// carries, and it is the right shape for an email subject line rather than a
+// board card. The date is what keeps a second expansion from the same account
+// from looking like a duplicate of the first.
+function buildDealName(p, receivedAt) {
+  const account = str(p.requester.account) || "Account";
+  const d = new Date(receivedAt);
+  const head = Number.isNaN(d.getTime())
+    ? `${account} — Expansion`
+    : `${account} — Expansion ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+
+  const items = p.lines
+    .map(l => ({ id: str(l.id), name: str(l.name), qty: unitsOf(p, str(l.id)) }))
+    .filter(x => x.qty > 0)
+    .map(x => `${x.qty} ${SHORT_LABELS[x.id] || CATALOGUE[x.id] || x.name || x.id}`);
+  if (!items.length) return head;
+
+  // Truncate on an item boundary and say how many were dropped, rather than
+  // slicing mid-word the way the old name did - "1 Outlet (Back of Hou" told
+  // whoever read the board nothing and looked broken.
+  const kept = [];
+  let used = head.length + 2;
+  for (let i = 0; i < items.length; i++) {
+    const sep = kept.length ? 2 : 0;
+    if (used + sep + items[i].length > DEAL_NAME_LIMIT) {
+      kept.push(`+${items.length - i} more`);
+      break;
+    }
+    used += sep + items[i].length;
+    kept.push(items[i]);
+  }
+  return `${head}: ${kept.join(", ")}`;
+}
+
 function buildSubject(p) {
   const bits = p.lines.map(l => {
     const qty = (Array.isArray(l.allocations) ? l.allocations : [])
@@ -1947,6 +2000,10 @@ async function createSalesDeal(token, props, companyIds, contactId) {
     dealtype: props.dealtype || "existingbusiness",
     country: props.country || undefined,
     [HS.retailerIdProp]: props.retailerId || undefined,
+    // Left unset rather than zeroed when no outlets were ordered: the field is
+    // labelled "Number of branches", and a 0 there reads as "this customer has
+    // no branches" rather than "this request added none".
+    [HS.branchesProp]: props.branches ? String(props.branches) : undefined,
   };
   // Strip undefined
   Object.keys(hsProps).forEach(k => hsProps[k] === undefined && delete hsProps[k]);
