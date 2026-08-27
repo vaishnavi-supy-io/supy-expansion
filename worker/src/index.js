@@ -1763,7 +1763,7 @@ function buildDealName(p, receivedAt) {
   const parts = [];
   if (branches > 0) parts.push(`${branches} ${branches === 1 ? "branch" : "branches"}`);
   if (hasAddon)     parts.push("add ons");
-  if (hasFeature)   parts.push("services and features");
+  if (hasFeature)   parts.push("features");
 
   return parts.length ? `${head}: ${parts.join(", ")}` : head;
 }
