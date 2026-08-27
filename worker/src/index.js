@@ -348,6 +348,7 @@ async function handleWebhook(request, env, ctx) {
   let noteId = null;
   let companyMatched = null;   // null = not attempted, false = nothing matched
   let matchedCompanyId = null;
+  let companyCandidates = [];  // set when several companies matched the name
   const token = await getHubspotToken(env);
   if (token) {
     const { id, action } = await upsertContact(token, payload);
@@ -358,7 +359,16 @@ async function handleWebhook(request, env, ctx) {
         const link = await linkEverything(token, noteId, contactId, crmCompanyName(payload));
         companyMatched = Boolean(link && link.matched);
         matchedCompanyId = (link && link.companyId) || null;
-        if (!companyMatched) results.push("company:no-match");
+        // "matched the wrong one" used to look identical to "matched": both
+        // reported nothing. Each outcome now names itself.
+        if (companyMatched) {
+          results.push(`company:matched:${link.how}`);
+        } else if (link && link.reason === "ambiguous") {
+          companyCandidates = link.candidates || [];
+          results.push(`company:ambiguous:${link.candidateCount}`);
+        } else {
+          results.push("company:no-match");
+        }
         results.push(`hubspot:${action}:note-ok`);
       } else {
         results.push(`hubspot:${action}:note-fail`);
@@ -513,7 +523,7 @@ async function handleWebhook(request, env, ctx) {
   }
 
   // 8. Slack. Includes country manager + account manager, and onboarding/sales context.
-  const slackCtx = { onboardingDeal, salesDealId, onboardingCompanyIds, companyMatched, onboardingLinked, bundle };
+  const slackCtx = { onboardingDeal, salesDealId, onboardingCompanyIds, companyMatched, companyCandidates, onboardingLinked, bundle };
   const slackOk = await sendSlack(env, payload, documents, contactId, submissionId, slackCtx);
   results.push(slackOk ? "slack:ok" : "slack:fail");
 
@@ -1234,14 +1244,42 @@ async function linkEverything(token, noteId, contactId, companyName) {
   try {
     const comps = await fetch(`${HUBSPOT_API}/crm/v3/objects/companies/search`, {
       method: "POST", headers,
-      body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: "name", operator: "CONTAINS_TOKEN", value: companyName }] }] }),
+      body: JSON.stringify({
+        filterGroups: [{ filters: [{ propertyName: "name", operator: "CONTAINS_TOKEN", value: companyName }] }],
+        properties: ["name"],
+        limit: 50,
+      }),
     });
     const found = (await comps.json()).results || [];
-    const companyId = found[0] && found[0].id;
-    if (!companyId) {
+    if (!found.length) {
       console.error("no HubSpot company matched", companyName, "- note left unassociated, nothing created");
       return { matched: false, reason: "no-match" };
     }
+
+    // CONTAINS_TOKEN matches on any token, so a retailer named "Din Tai fung"
+    // returns nine companies - Australia, Singapore, HK, UK, US and the rest -
+    // and taking found[0] attached the request to whichever HubSpot happened to
+    // return first. That is a coin toss, and the wrong company is worse than
+    // none: the same reasoning that stopped this code creating companies on a
+    // miss applies to picking one arbitrarily.
+    const want  = companyName.trim().toLowerCase();
+    const named = found.map(c => ({ id: String(c.id), name: str(c.properties && c.properties.name) }));
+    const exact = named.filter(c => c.name.trim().toLowerCase() === want);
+
+    let chosen = null, how = "";
+    if (exact.length === 1)      { chosen = exact[0]; how = "exact"; }
+    else if (exact.length > 1)   { chosen = null;     how = "ambiguous"; }
+    else if (named.length === 1) { chosen = named[0]; how = "sole"; }
+    else                         { chosen = null;     how = "ambiguous"; }
+
+    if (!chosen) {
+      const names = named.slice(0, 6).map(c => c.name).filter(Boolean);
+      console.error("ambiguous company match for", companyName, `- ${named.length} candidates, none associated:`,
+        names.join(" | "));
+      return { matched: false, reason: "ambiguous", candidates: names, candidateCount: named.length };
+    }
+    const companyId = chosen.id;
+    console.log("company matched", how, chosen.name, companyId);
 
     await assoc("Contacts", contactId, "Companies", companyId, "contact_to_company");
     await assoc("Notes",    noteId,    "Companies", companyId, "note_to_company");
@@ -1251,7 +1289,7 @@ async function linkEverything(token, noteId, contactId, companyName) {
         await assoc("Notes", noteId, "Deals", deal.id, "note_to_deal");
       }
     }
-    return { matched: true, companyId: String(companyId) };
+    return { matched: true, companyId: String(companyId), how, name: chosen.name };
   } catch (err) {
     console.error("company association failed", String(err));
     return { matched: false, reason: "error" };
@@ -1635,7 +1673,12 @@ async function sendSlack(env, p, documents, contactId, submissionId, ctx = {}) {
   if (!ctx.salesDealId) flags.push("*no deal was created* - raise it by hand");
   else if (!ctx.onboardingDeal) flags.push("deal has *no owner* - assign it");
   else if (ctx.onboardingLinked === false) flags.push("deal is not linked to the onboarding deal");
-  if (ctx.companyMatched === false) flags.push(`no company matched *${smk(crmCompanyName(p))}* - attach it`);
+  if (ctx.companyMatched === false && ctx.companyCandidates && ctx.companyCandidates.length) {
+    flags.push(`*${ctx.companyCandidates.length} companies* match *${smk(crmCompanyName(p))}* - none attached, pick one: `
+      + ctx.companyCandidates.map(n => smk(n)).join(", "));
+  } else if (ctx.companyMatched === false) {
+    flags.push(`no company matched *${smk(crmCompanyName(p))}* - attach it`);
+  }
   const flagText = flags.length ? clip(`:warning: ${flags.join("\n:warning: ")}`) : "";
   if (flagText && !threaded) {
     blocks.push({ type: "section", text: { type: "mrkdwn", text: flagText } });
