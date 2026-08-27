@@ -184,6 +184,15 @@ export default {
     ctx.waitUntil((async () => {
       const r = await drainSheetsQueue(env, 100);
       if (r.sent || r.pending) console.log("sheets queue drained", JSON.stringify(r));
+      // A cold Apps Script is the whole reason the retailer lookup timed out.
+      // doGet with no email is its cheapest response, so this keeps the
+      // deployment warm between requests for the cost of one fetch.
+      const warmUrl = env.RETAILER_SHEET_URL || env.USER_ACCESS_SHEET_URL || env.GOOGLE_SCRIPT_URL;
+      if (warmUrl) {
+        try {
+          await fetch(warmUrl, { signal: AbortSignal.timeout(20000) });
+        } catch (e) { console.error("access sheet warm-up failed", String(e)); }
+      }
     })());
   },
 
@@ -1948,7 +1957,12 @@ const isDraftKey  = k => typeof k === "string" && /^[a-f0-9]{40}$/.test(k);
 // ─────────────────────────────────────────────────────────────
 // How long a customer waits on the access sheet before the form moves on, and
 // how long the background pass gets to warm the cache afterwards.
-const SHEET_TIMEOUT_MS = 6000;
+// Measured: the directory answers in ~3.3s warm and exceeds 6s cold, so a 6s
+// budget failed every first lookup of the day and the picklist never appeared -
+// which is why requests arrived with a typed account name and no retailer id.
+// The form shows "Checking which retailers this email can access…" while it
+// waits, so 10s costs a visible pause rather than a broken control.
+const SHEET_TIMEOUT_MS = 10000;
 const SHEET_BACKGROUND_TIMEOUT_MS = 25000;
 
 async function readAccessSheet(sheetUrl, email, timeoutMs) {

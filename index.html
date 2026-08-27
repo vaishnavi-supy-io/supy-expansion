@@ -984,7 +984,7 @@ function renderRetailerOptions(){
   state.retailerId = opt ? (opt.dataset.rid || '') : '';
   if (hint) hint.textContent = list.length + ' retailer(s) available for this email. Select the one this expansion is for.';
 }
-let retailerRetried = false;
+let retailerRetried = 0;
 async function fetchRetailers(){
   const email = $('email') ? $('email').value.trim() : '';
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)){
@@ -1014,10 +1014,13 @@ async function fetchRetailers(){
     // The access sheet was too slow to wait for, but the Worker kept going and
     // cached the answer. One retry picks it up rather than stranding them in
     // free text for a timeout that has already resolved.
-    if (j.source === 'sheet-timeout' && !retailerRetried){
-      retailerRetried = true;
+    if (j.source === 'sheet-timeout' && retailerRetried < 2){
+      retailerRetried++;
       if (hint) hint.textContent = 'Still checking your access…';
-      setTimeout(fetchRetailers, 5000);
+      // The Worker keeps looking in the background for up to 25s, so the retry
+      // has to land after that finishes, not before it. At 5s it raced the
+      // lookup it was waiting for and usually lost.
+      setTimeout(fetchRetailers, 12000);
     }
   } catch {
     state.retailers = [];
