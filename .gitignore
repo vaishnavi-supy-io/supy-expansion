@@ -13,3 +13,5 @@ node_modules/
 worker/.sheeturl
 # Generated ADMIN_TOKEN, kept out of git.
 worker/.admin-token
+# One-time handoff file for the Slack bot token. Never committed.
+worker/.slacktoken

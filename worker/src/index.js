@@ -247,7 +247,8 @@ export default {
           try { queued = (await env.LOGS.list({ prefix: SHEETS_QUEUE_PREFIX, limit: 1000 })).keys.length; }
           catch { /* not fatal */ }
         }
-        return json({ ok: true, sheets, queuedForSheets: queued, admin: Boolean(env.ADMIN_TOKEN) }, 200, request, env);
+        return json({ ok: true, sheets, queuedForSheets: queued, admin: Boolean(env.ADMIN_TOKEN),
+          slackWarningsThreaded: Boolean(env.SLACK_BOT_TOKEN && env.SLACK_CHANNEL) }, 200, request, env);
       }
       if (url.pathname === "/") {
         return new Response("Supy Expansion Request: Online", {
@@ -1542,8 +1543,14 @@ const SHORT_ITEM = {
 };
 
 async function sendSlack(env, p, documents, contactId, submissionId, ctx = {}) {
-  if (!env.SLACK_WEBHOOK_URL) {
-    console.error("SLACK_WEBHOOK_URL not configured");
+  // Threading needs chat.postMessage: an incoming webhook returns "ok" and no
+  // message ts, and thread_ts is the ts of the parent. So with a bot token the
+  // warnings go into a thread on the request; with only a webhook they stay in
+  // the message, because dropping "deal has no owner" entirely would be worse
+  // than showing it in a place we would rather it were not.
+  const threaded = Boolean(env.SLACK_BOT_TOKEN && env.SLACK_CHANNEL);
+  if (!threaded && !env.SLACK_WEBHOOK_URL) {
+    console.error("Neither SLACK_BOT_TOKEN + SLACK_CHANNEL nor SLACK_WEBHOOK_URL is configured");
     return false;
   }
 
@@ -1563,7 +1570,7 @@ async function sendSlack(env, p, documents, contactId, submissionId, ctx = {}) {
   const entityNames = p.billing.entities.map(e => str(e.name)).filter(Boolean);
 
   const accountLine = scope === "Existing account" && retailer
-    ? `${smk(retailer)}${retailerId ? "" : "  ·  _unverified_"}`
+    ? smk(retailer)
     : scope === "New account" ? `${smk(str(p.accountScope.newAccountName) || account)}  ·  _new_`
     : smk(scope || "scope not given");
 
@@ -1587,7 +1594,7 @@ async function sendSlack(env, p, documents, contactId, submissionId, ctx = {}) {
   const blocks = [
     { type: "header", text: { type: "plain_text", text: `Expansion request - ${account}`.slice(0, 150), emoji: true } },
     { type: "context", elements: [{ type: "mrkdwn", text:
-      `${accountLine}  ·  ${smk(p.requester.country || "-")}  ·  ${smk(when)}  ·  \`${smk(submissionId).slice(0, 8)}\`  ·  _a request, nothing provisioned_` }] },
+      `${accountLine}  ·  ${smk(p.requester.country || "-")}  ·  ${smk(when)}  ·  \`${smk(submissionId).slice(0, 8)}\`` }] },
     { type: "section", text: { type: "mrkdwn", text:
       `*${totalUnits} unit${totalUnits === 1 ? "" : "s"}*  ·  ${p.lines.length} item${p.lines.length === 1 ? "" : "s"}`
       + (entityNames.length ? `  ·  ${entityNames.length} ${entityNames.length === 1 ? "entity" : "entities"}` : "")
@@ -1629,8 +1636,9 @@ async function sendSlack(env, p, documents, contactId, submissionId, ctx = {}) {
   else if (!ctx.onboardingDeal) flags.push("deal has *no owner* - assign it");
   else if (ctx.onboardingLinked === false) flags.push("deal is not linked to the onboarding deal");
   if (ctx.companyMatched === false) flags.push(`no company matched *${smk(crmCompanyName(p))}* - attach it`);
-  if (flags.length) {
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: clip(`:warning: ${flags.join("\n:warning: ")}`) } });
+  const flagText = flags.length ? clip(`:warning: ${flags.join("\n:warning: ")}`) : "";
+  if (flagText && !threaded) {
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: flagText } });
   }
 
   const buttons = [{
@@ -1652,17 +1660,74 @@ async function sendSlack(env, p, documents, contactId, submissionId, ctx = {}) {
   }
   blocks.push({ type: "actions", elements: buttons.slice(0, 5) });
 
+  const summary = buildSubject(p);
+
+  if (threaded) {
+    const parent = await slackApi(env, "chat.postMessage",
+      { channel: env.SLACK_CHANNEL, text: summary, blocks });
+    // The bot token is the better path, but it fails in ways the webhook does
+    // not - not_in_channel, channel_not_found on a private channel it was
+    // never invited to, a revoked token - and a request nobody is told about
+    // is the one outcome worse than a badly formatted one. So a failure here
+    // falls through to the webhook with the warnings back inline.
+    if (!parent || !parent.ts) {
+      if (!env.SLACK_WEBHOOK_URL) return false;
+      console.error("chat.postMessage failed, falling back to the webhook");
+      if (flagText) blocks.push({ type: "section", text: { type: "mrkdwn", text: flagText } });
+      return postSlackWebhook(env, summary, blocks);
+    }
+    // A failed reply must not fail the leg: the request itself is already
+    // posted, and the flags are recoverable from the deal and the sheet.
+    if (flagText) {
+      await slackApi(env, "chat.postMessage", {
+        channel: env.SLACK_CHANNEL,
+        thread_ts: parent.ts,
+        text: "Needs attention",
+        blocks: [{ type: "section", text: { type: "mrkdwn", text: flagText } }],
+      });
+    }
+    return true;
+  }
+
+  return postSlackWebhook(env, summary, blocks);
+}
+
+async function postSlackWebhook(env, summary, blocks) {
   try {
     const r = await fetch(env.SLACK_WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: buildSubject(p), blocks }),
+      body: JSON.stringify({ text: summary, blocks }),
     });
     if (!r.ok) console.error("Slack post failed", r.status, await r.text().catch(() => ""));
     return r.ok;
   } catch (err) {
     console.error("Slack post threw", String(err));
     return false;
+  }
+}
+
+// Slack answers 200 with {ok:false,error:"..."} for most failures, exactly the
+// trap the Sheets mirror fell into, so the body is what decides.
+async function slackApi(env, method, body) {
+  try {
+    const r = await fetch(`https://slack.com/api/${method}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json().catch(() => null);
+    if (!j || !j.ok) {
+      console.error("slack", method, "failed", j && j.error ? j.error : `http ${r.status}`);
+      return null;
+    }
+    return j;
+  } catch (err) {
+    console.error("slack", method, "threw", String(err));
+    return null;
   }
 }
 
@@ -2306,6 +2371,9 @@ function handleDebug(request, env) {
     CLIENT_SECRET:         Boolean(env.CLIENT_SECRET),
     REFRESH_TOKEN:         Boolean(env.REFRESH_TOKEN),
     SLACK_WEBHOOK_URL:     Boolean(env.SLACK_WEBHOOK_URL),
+    SLACK_BOT_TOKEN:       Boolean(env.SLACK_BOT_TOKEN),
+    SLACK_CHANNEL:         Boolean(env.SLACK_CHANNEL),
+    slackWarningsThreaded: Boolean(env.SLACK_BOT_TOKEN && env.SLACK_CHANNEL),
     GMAIL_CLIENT_ID:       Boolean(env.GMAIL_CLIENT_ID),
     GMAIL_CLIENT_SECRET:   Boolean(env.GMAIL_CLIENT_SECRET),
     GMAIL_REFRESH_TOKEN:   Boolean(env.GMAIL_REFRESH_TOKEN),
