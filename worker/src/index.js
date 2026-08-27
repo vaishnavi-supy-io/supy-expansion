@@ -1752,7 +1752,7 @@ function buildDealName(p, receivedAt) {
   const d = new Date(receivedAt);
   const head = Number.isNaN(d.getTime())
     ? account
-    : `${account} — ${MONTHS_FULL[d.getUTCMonth()]} ${d.getUTCDate()}`;
+    : `${account} — ${MONTHS_FULL[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 
   const branches   = unitsOf(p, "outlet");
   const hasAddon   = ADDON_IDS.some(id => unitsOf(p, id) > 0);
