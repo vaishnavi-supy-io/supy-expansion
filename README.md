@@ -1,11 +1,8 @@
-# supy-expansion
+# supy-expansion — Self-service expansion requests for Supy clients
 
-Self-service expansion request form for existing Supy clients, plus the Cloudflare
-Worker that receives it. A client picks what they want to add from a catalogue —
-outlet licenses, CK and WH add-ons, extra cost centers, and features — sets a
-quantity for each, and splits any line across billing entities. The request
-arrives structured and attached to the right CRM record, instead of as an email
-thread someone has to unpick.
+> **In one sentence:** A client opens a link, ticks what they want to add (outlets, add-ons, features), says how many and which billing entity each quantity sits under, attaches the required trade documents, and clicks Submit. The request lands — structured, with files — in HubSpot, Slack, email, Google Sheets and Cloudinary so ops can act on it. Nothing is provisioned automatically.
+
+Self-service expansion request form for existing Supy clients, plus the Cloudflare Worker that receives it. A client picks what they want to add from a catalogue — outlet licenses, CK and WH add-ons, extra cost centers, and features — sets a quantity for each, and splits any line across billing entities. The request arrives structured and attached to the right CRM record, instead of as an email thread someone has to unpick.
 
 **Catalogue**
 
@@ -50,6 +47,50 @@ Cloudflare Worker
      ├─→ Sheets          Requests + Items + Entities + Documents - the whole record
      └─→ KV              draft storage, submission log, idempotency record
 ```
+
+---
+
+## How it works — in plain English
+
+You don't need to know Cloudflare or HubSpot to follow this. There are only three actors: **the form** (a static page on GitHub Pages), **the Worker** (a small backend on Cloudflare that runs only when someone submits), and **the downstream systems** it delivers to.
+
+**Step by step, what happens when a client clicks Submit:**
+
+1. **Client fills the form at `index.html`.** The page runs entirely in the browser. It validates as you type, remembers progress in `localStorage` so a refresh doesn't lose work, and lets you save a 30-day resume link (`POST /draft/save` → KV). Nothing leaves the browser until Submit.
+
+2. **The browser POSTs one request to `POST /webhook`.** The body is `multipart/form-data`: one field called `payload` (JSON) plus one file field per document (`documents[entityIndex][kind]`). The form also sends a `submissionNonce` (a random id for this click) so a double-click or retry doesn't create two requests.
+
+3. **The Worker validates everything again on the server** (`worker/src/index.js:validate:763`). Browser checks can be bypassed, so the Worker re-checks: required fields, valid email/phone/country, catalogue ids are real, quantities are integers ≥1, `totalQuantity == sum(allocations)`, every `billsUnder` names a declared billing entity (or the default "Existing billing entity"), documents per entity / per request caps, file type and size. If anything fails it returns `400` with a `problems[]` array naming each field.
+
+4. **The Worker fans the same submission out to every configured destination, independently.** If one leg fails the others still succeed and the response tells you which did (`details[]` like `hubspot:updated:note-ok`, `slack:ok`, `documents:2/2`). A failed document upload never sinks the whole submission — Slack and HubSpot carry a warning naming the files to chase.
+
+5. **A human confirms scope and timing.** Nothing is provisioned automatically. The CSM reviews the HubSpot note / Slack message / Sheet row and confirms with the client.
+
+### Where does each piece of data live?
+
+| What | Where it is saved | Why there | How long / who can see it |
+|---|---|---|---|
+| **Drafts + prefill links** | Cloudflare KV `DRAFTS` (`worker/wrangler.toml:19`) — key is a random 32-char token | So a client can save and resume for 30 days without an account. The key *is* the credential — anyone with the link can open it. | `expirationTtl: 30 days`. No documents are stored in drafts — files stay in the browser until Submit. `GET /draft/load?key=` restores. |
+| **Documents** | Cloudinary — `supy-expansion/{YYYY-MM-DD}_{account-slug}/` (`worker/src/index.js:1018`) as `raw/upload`, plus a ZIP bundle when >2 files (`worker/src/index.js:1059`) | Cheap, durable file storage the Worker can write to without a Google login. Each file gets a public_id and a `/download?key=&name=` link via `worker/src/index.js:224`. | Permanent until deleted in Cloudinary. Links are unlisted but not authenticated — validity is obscurity. |
+| **Submission log** | KV `LOGS` — last 200 lines (`worker/src/index.js:566`) + `GET /logs` (admin token) | Quick audit of "did this submission arrive?" without opening HubSpot. | Rolling buffer. `GET /sheets/retry` + cron `*/15 * * * *` also replays anything Sheets missed. |
+| **Rate limit + idempotency** | KV `RATELIMIT` — per-IP counter (5 per 10 min) + `sub:{nonce}` record (`worker/src/index.js:615`) | Stops repeat clicks / double submits. Same `submissionNonce` returns the original response with `duplicate:true`. | Counter = 10 min, nonce = 1 hour. |
+| **CRM record** | HubSpot — `contact` upsert by email → `note` with HTML body → associations to `company` + `deals` + `note→deal` (`worker/src/index.js:362`) | So the request lives where the CSM already works. Companies are **matched, never created** — a name mismatch like "Iris Abu Dhabi - Addmind" vs "Addmind Hospitality" used to fork duplicates (`README:222`). On miss it falls back to the onboarding deal's companies; otherwise `company:no-match` and Slack asks a CSM to attach it manually. | Permanent in HubSpot. Every submission also creates a **Sales 360 deal** in pipeline `21726624` (stage `Proposal Sent`), linked to contact + company, for pipeline tracking. |
+| **Retailer identity / who can request for which account** | Google Sheet `1raBGqWqxVaUcraY0gjR-CFQT3T2_TheemPfOpihmmFE` (gid `599203487`), served by `google-apps-script/Code.gs:doGet` via `GET /retailers?email=` (`worker/src/index.js:226`) | Single source of truth: "this email may request for these retailers". The directory is refreshed daily elsewhere. | Sheet is read-only from this repo. Worker caches hits 10 min / misses 60s. Rows without a `retailer_id` are skipped and counted as `missingId`. |
+| **Spreadsheet mirror** | Google Sheets — `google-apps-script/Code.gs:doPost` writes 4 tabs in `LOG_SPREADSHEET_ID = 1f0pRoEUI9XFWscSQ9uo5tboFGmMy68PBGi5ZFFBQuHQ` (never the directory above — `getLogSpreadsheet:145`) | Ops-friendly view without HubSpot access: `Requests` (one row per submission), `Items` (one row per allocation — a product split across 2 entities = 2 rows), `Entities` (billing entity), `Documents` (per file + stored/error). | Permanent. De-duplicated by `submissionId` (`alreadyLogged:288` checks last 200 rows). Cron retries on failure. |
+| **Notifications** | Slack Block Kit message (webhook or `SLACK_BOT_TOKEN` threaded) + Gmail (internal notification + client receipt, gated on `contactId` so the endpoint can't be used to send branded mail to an arbitrary address) | Instant visibility for CS + confirmation for client. Slack shows retailer pick vs typed warning, deal/company links, document + ZIP buttons, country/account manager mentions. | Slack/Gmail retention per those products. |
+| **Country / account manager routing** | In-code map `DEFAULT_COUNTRY_MANAGERS` (`worker/src/index.js:110`), overridable via `COUNTRY_MANAGERS_JSON` env | Tags the right owner in Slack by `requester.country`. | Config, not data. |
+
+### Data sources — where the Worker reads from
+
+1. **Retailer access sheet** (above) — the *only* lookup for "which retailer does this email belong to". The chosen row's `retailer_id` travels as `accountScope.existingRetailerId` and is used to find the onboarding deal (`retailer_id EQ <id>` in pipeline `21524094`). No fallback to HubSpot companies or name search — those caused wrong-account routing and were removed.
+2. **HubSpot CRM** — contact search by email, company search by name (exact match), deal search by `retailer_id`. Read via `HUBSPOT_API` with OAuth refresh (`CLIENT_ID/SECRET/REFRESH_TOKEN`).
+3. **Worker env / secrets** — `wrangler.toml:vars` + `wrangler secret put` values. `/debug` and `/health` report only booleans/hosts, never secret values.
+
+### What is never stored or created
+
+- No company is ever created from a form submission (even though HubSpot has a portal setting that can — turn off *Create and associate companies with contacts* in HubSpot → Settings → Objects → Companies if you want zero auto-creation).
+- Drafts never contain document file contents.
+- The Worker never writes to the retailer directory sheet.
 
 ---
 
