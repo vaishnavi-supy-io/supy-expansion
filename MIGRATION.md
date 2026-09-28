@@ -47,8 +47,29 @@ GET /debug   → acceptingSubmissions: false
 
 ### What is left, and why nobody else can do it
 
-Cloudflare secrets are write-only — the API returns names, never values — so
-nothing could be copied from the old Worker. These have to come from source:
+Cloudflare secrets are write-only — the API and the dashboard both return names,
+never values — so nothing could be copied from the old Worker, and nothing on
+the machine that built it has them either.
+
+There is one way round that, recorded here in case it is ever needed. Cloudflare
+hides secrets from people, not from the Worker itself: `env.CLOUDINARY_API_SECRET`
+is perfectly readable at runtime, so a build that returns its own `env` hands
+them over.
+
+```
+wrangler versions upload    # a version with its own preview URL,
+                            # WITHOUT moving production traffic
+```
+
+Gate that endpoint behind a one-time token, pull the values from the preview
+URL, pipe them straight into `wrangler secret put` on the destination, delete
+the version. Production keeps serving throughout. Caveat: workers-sdk#10068
+suggests uploaded versions may not inherit secrets, so it may return nothing.
+
+It was not used, because it is not necessary. **None of these are one-time-view
+secrets.** Every one is displayed permanently in its own console, so reading
+them from source gives the same values with nothing deployed and nothing
+exposed:
 
 | Secret | Where from |
 |---|---|
