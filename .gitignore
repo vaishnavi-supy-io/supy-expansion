@@ -19,3 +19,6 @@ worker/.slacktoken
 # Static assets copied in at deploy time by worker/sync-assets.sh.
 # index.html and sample.html at the repo root stay the single source of truth.
 worker/public/
+
+# Locally filled-in secrets, pushed with worker/push-secrets.sh. Never committed.
+worker/.secrets.local

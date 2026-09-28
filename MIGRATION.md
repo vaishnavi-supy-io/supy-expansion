@@ -61,10 +61,48 @@ nothing could be copied from the old Worker. These have to come from source:
 
 `ADMIN_TOKEN` and `RATE_LIMIT` are already set; skip them when the script asks.
 
+Two ways to do it. Both push into the same place; pick whichever suits.
+
+**One sitting, prompted:**
+
 ```bash
 cd worker && ./setup-secrets.sh
-curl -s https://expansion.supy.io/health | python3 -m json.tool   # sheets should stop saying "unset"
 ```
+
+**Over several sittings, a value at a time** — better if the credentials have to
+be collected from different places or different people:
+
+```bash
+cd worker
+cp .secrets.local.example .secrets.local     # gitignored, created 0600
+$EDITOR .secrets.local                       # fill in whatever you have today
+./push-secrets.sh --dry-run                  # see what would go, push nothing
+./push-secrets.sh                            # pushes only the filled-in ones
+```
+
+Blank values are skipped, so it is safe to run as many times as you like —
+nothing already set gets clobbered. It warns if wrangler is pointed at the wrong
+account, tolerates quoted values, never prints one, and prints `/health`
+afterwards so you can watch the channels come up.
+
+`.secrets.local` is plaintext on disk, which is a step down from Cloudflare's
+write-only store. Once every value is pushed and a test submission has gone
+through, get rid of it:
+
+```bash
+./push-secrets.sh --shred
+```
+
+Check progress at any point:
+
+```bash
+curl -s https://expansion.supy.io/health | python3 -m json.tool
+curl -s -H "x-admin-token: $(cat worker/.admin-token)" \
+  https://expansion.supy.io/debug | python3 -m json.tool
+```
+
+`sheets` should stop saying `"unset"`, and `acceptingSubmissions` should flip to
+`true` as soon as HubSpot or Slack has credentials.
 
 ### Then, and only then
 
