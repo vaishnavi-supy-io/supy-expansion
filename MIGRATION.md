@@ -21,7 +21,7 @@ Deployed to the supy.io account. Not reachable, and not yet functional.
 | Route attached | ✅ `expansion.supy.io/*` → `supy-expansion` |
 | DNS record | ❌ **blocked** — `dig expansion.supy.io` returns nothing |
 | Secrets | ❌ **not set** — `wrangler secret list` returns `[]` |
-| Drafts copied from the old namespace | ❌ deliberately last, just before cutover |
+| Drafts copied from the old namespace | ⚠️ first pass done (1 key) — **re-run at cutover** |
 
 `https://expansion.supy.io/health` returns nothing at all: the route is attached
 but the hostname does not resolve, so no request ever reaches Cloudflare's edge
@@ -134,37 +134,56 @@ npx wrangler kv namespace create RATELIMIT
 **3. Carry the live drafts across.** `DRAFTS` holds 30-day resume links that
 clients may be halfway through. Skip this and those links 404.
 
-Drafts are written with a 30-day TTL, so the copy has to carry each key's
-existing expiry across — otherwise they either come back from the dead or all
-expire together.
+Drafts carry a TTL, so the copy has to bring each key's existing expiry with it
+— otherwise they either come back from the dead or all expire together.
+
+**This cannot be done with `wrangler`.** `account_id` in `wrangler.toml` now
+points at the org account and overrides `CLOUDFLARE_ACCOUNT_ID`, so any attempt
+to read the old namespace looks for it on the wrong account:
+
+```
+get namespace: 'namespace not found' [code: 10013]
+```
+
+Go straight to the API, which can address both accounts in one script:
 
 ```bash
-cd worker
-OLD=32de3d0e21bd4681b3a8d9c07dd6b4d8   # personal account
-NEW=<the new DRAFTS id>
+TOK=$(grep -m1 '^oauth_token' ~/.wrangler/config/default.toml | sed 's/.*= *"//; s/"//')
+PERS=5d17e7b0e9e74f074adff38975282562   # old, personal
+ORG=f3adfa5ed42dea46fdeb8be255b1cd2b    # new, supy.io
+OLD=32de3d0e21bd4681b3a8d9c07dd6b4d8    # old DRAFTS
+NEW=2848982e9a3142398c8ebf2a8efaffbf    # new DRAFTS
 tmp=$(mktemp -d)
 
-npx wrangler kv key list --namespace-id "$OLD" > "$tmp/keys.json"
-python3 -c 'import json,sys
-for k in json.load(open(sys.argv[1])):
-    print(k["name"], k.get("expiration") or "", sep="\t")' "$tmp/keys.json" \
-| while IFS=$'\t' read -r key exp; do
-    npx wrangler kv key get "$key" --namespace-id "$OLD" > "$tmp/value"
-    if [ -n "$exp" ]; then
-      npx wrangler kv key put "$key" --namespace-id "$NEW" --path "$tmp/value" --expiration "$exp"
-    else
-      npx wrangler kv key put "$key" --namespace-id "$NEW" --path "$tmp/value"
-    fi
-  done
+curl -s "https://api.cloudflare.com/client/v4/accounts/$PERS/storage/kv/namespaces/$OLD/keys?limit=1000" \
+  -H "Authorization: Bearer $TOK" > "$tmp/keys.json"
+
+python3 - "$tmp" <<'EOF'
+import json,sys,urllib.parse
+d=json.load(open(sys.argv[1]+'/keys.json'))
+with open(sys.argv[1]+'/keys.tsv','w') as f:
+    for k in d.get('result') or []:
+        f.write('%s\t%s\t%s\n' % (k['name'], urllib.parse.quote(k['name'],safe=''), k.get('expiration') or ''))
+EOF
+
+while IFS=$'\t' read -r key enc exp; do
+  curl -s -f "https://api.cloudflare.com/client/v4/accounts/$PERS/storage/kv/namespaces/$OLD/values/$enc" \
+       -H "Authorization: Bearer $TOK" -o "$tmp/value" || { echo "READ FAILED: $key"; continue; }
+  q=""; [ -n "$exp" ] && q="?expiration=$exp"
+  curl -s -X PUT "https://api.cloudflare.com/client/v4/accounts/$ORG/storage/kv/namespaces/$NEW/values/$enc$q" \
+       -H "Authorization: Bearer $TOK" -F "value=<$tmp/value" -F 'metadata={}' > /dev/null \
+    && echo "copied: $key (expiration: ${exp:-none})"
+done < "$tmp/keys.tsv"
 
 rm -rf "$tmp"
 ```
 
-Check the count matches before cutting over:
+Writes overwrite, so this is safe to run as many times as you like. **Run it
+again immediately before cutover** — anything saved between the last run and the
+switch is otherwise stranded on the old namespace.
 
-```bash
-npx wrangler kv key list --namespace-id "$NEW" | python3 -c 'import sys,json; print(len(json.load(sys.stdin)), "keys")'
-```
+First pass, 2026-09-28: one key, `acct:14766d6a…`, expiring 2026-11-25. It is an
+account-link record rather than a saved draft, so no client was mid-form.
 
 `LOGS` is a rolling window of the last 200 submissions and `RATELIMIT` is
 per-IP and short-lived — neither is worth copying.
