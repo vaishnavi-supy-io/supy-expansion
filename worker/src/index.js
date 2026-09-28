@@ -184,6 +184,10 @@ export default {
     ctx.waitUntil((async () => {
       const r = await drainSheetsQueue(env, 100);
       if (r.sent || r.pending) console.log("sheets queue drained", JSON.stringify(r));
+      // Anything held while there was nowhere to deliver goes out as soon as
+      // there is. No-ops until a channel is configured.
+      const h = await drainHoldQueue(env, ctx, 25);
+      if (h.sent || h.pending) console.log("held submissions drained", JSON.stringify(h));
       // A cold Apps Script is the whole reason the retailer lookup timed out.
       // doGet with no email is its cheapest response, so this keeps the
       // deployment warm between requests for the cost of one fetch.
@@ -235,6 +239,20 @@ export default {
         }
         return json(await drainSheetsQueue(env), 200, request, env);
       }
+      // What is waiting, and a way to push it through. Same admin guard as
+      // /sheets/retry: a held submission carries a client's contact details.
+      if (url.pathname === "/pending" && request.method === "GET") {
+        if (!env.ADMIN_TOKEN || request.headers.get("x-admin-token") !== env.ADMIN_TOKEN) {
+          return json({ error: "Unauthorized" }, 401, request, env);
+        }
+        return json({ held: await countHeld(env), submissions: await listHeld(env) }, 200, request, env);
+      }
+      if (url.pathname === "/pending/replay") {
+        if (!env.ADMIN_TOKEN || request.headers.get("x-admin-token") !== env.ADMIN_TOKEN) {
+          return json({ error: "Unauthorized" }, 401, request, env);
+        }
+        return json(await drainHoldQueue(env, ctx, 25), 200, request, env);
+      }
       if (url.pathname === "/logs" && request.method === "GET") {
         return await handleLogs(request, env);
       }
@@ -257,6 +275,8 @@ export default {
           catch { /* not fatal */ }
         }
         return json({ ok: true, sheets, queuedForSheets: queued, admin: Boolean(env.ADMIN_TOKEN),
+          acceptingSubmissions: true,
+          heldAwaitingDelivery: await countHeld(env),
           slackWarningsThreaded: Boolean(env.SLACK_BOT_TOKEN && env.SLACK_CHANNEL) }, 200, request, env);
       }
       if (url.pathname === "/") {
@@ -285,19 +305,18 @@ async function handleWebhook(request, env, ctx) {
     }
   }
 
-  // 2. Refuse rather than swallow. A submission that reaches nobody is worse
-  //    than one that is turned away: the client sees "Request submitted" and
-  //    walks away while the request evaporates. That silent loss is the exact
-  //    failure this whole form exists to prevent, so if no delivery channel is
-  //    configured at all, say so instead of accepting it.
+  // 2. Delivery channels. This used to refuse outright when none were
+  //    configured, on the reasoning that a submission reaching nobody is worse
+  //    than one turned away — the client sees "Request submitted", walks away,
+  //    and the request evaporates. That reasoning still holds against silently
+  //    dropping it. It does not hold against writing it down: a held
+  //    submission is not lost, it is waiting, and step 5c below says so to the
+  //    client rather than pretending the request is on its way.
+  //
+  //    The check happens after parsing and validation so there is something
+  //    worth holding — a malformed submission is still rejected on its merits.
   const channels = deliveryChannels(env);
-  if (!Object.values(channels).some(Boolean)) {
-    return json({
-      status: "error",
-      message: "This form is not accepting submissions yet. Please contact your Supy "
-             + "customer success manager directly so your request is not lost.",
-    }, 503, request, env);
-  }
+  const canDeliver = Object.values(channels).some(Boolean);
 
   // 3. Approximate rate limit. KV is eventually consistent, so a burst of
   //    parallel requests can slip past; it stops repeat submissions, not a
@@ -336,6 +355,35 @@ async function handleWebhook(request, env, ctx) {
   const receivedAt   = new Date().toISOString();
   const account      = payload.requester.account;
   const results      = [];
+
+  // 5c. Nowhere to deliver yet. Write the whole thing down — payload and
+  //     attachments — and tell the client plainly that it is recorded and
+  //     waiting rather than on its way. POST /pending/replay pushes the backlog
+  //     through once credentials exist, and the cron does it unattended.
+  if (!canDeliver) {
+    const held = await holdSubmission(env, { payload, files, submissionId, receivedAt, account });
+    if (!held.ok) {
+      // Could not even write it down. Now refusing IS the right answer.
+      return json({
+        status: "error",
+        message: "This form is not accepting submissions yet. Please contact your Supy "
+               + "customer success manager directly so your request is not lost.",
+      }, 503, request, env);
+    }
+    return json({
+      status: "held",
+      submissionId,
+      receivedAt,
+      summary: buildSubject(payload),
+      documents: { held: held.filesStored, tooLarge: held.filesTooLarge },
+      message: held.filesTooLarge
+        ? "Your request has been recorded and is queued for processing. "
+        + held.filesTooLarge + " attachment(s) were too large to hold and will need "
+        + "to be sent again — your Supy customer success manager will be in touch."
+        : "Your request has been recorded and is queued for processing. "
+        + "Your Supy customer success manager will confirm scope and timeline.",
+    }, 202, request, env);
+  }
 
   // 6. Documents → Cloudinary. Failures are recorded but do not sink the
   //    submission: a request that reaches the team without its trade license
@@ -2267,6 +2315,164 @@ async function logToSheets(env, p, documents, receivedAt, submissionId, bundle, 
 // of that should leave a hole in the record.
 // ─────────────────────────────────────────────────────────────
 const SHEETS_TIMEOUT_MS = 15000;
+// ─────────────────────────────────────────────────────────────
+// Held submissions
+//
+// When no delivery channel is configured, a submission is written here instead
+// of being turned away. The payload and its attachments are kept with no
+// expiry: unlike a draft, this is a request someone has actually made, and it
+// is not ours to let lapse. Replayed through the normal path by
+// POST /pending/replay, or unattended by the cron.
+//
+// Attachments are base64 in KV, which is not what KV is for. It is a holding
+// pen measured in days, not a document store — hence the caps. Anything over
+// them is recorded by name so nobody has to guess what is missing.
+// ─────────────────────────────────────────────────────────────
+const HOLD_PREFIX      = "hold:";
+const HOLD_FILE_PREFIX = "holdfile:";
+const HOLD_FILE_MAX    = 8  * 1024 * 1024;   // per attachment, raw bytes
+const HOLD_TOTAL_MAX   = 20 * 1024 * 1024;   // per submission, raw bytes
+
+async function holdSubmission(env, { payload, files, submissionId, receivedAt, account }) {
+  if (!env.LOGS) return { ok: false, filesStored: 0, filesTooLarge: 0 };
+  let stored = 0, tooLarge = 0, budget = HOLD_TOTAL_MAX;
+  const manifest = [];
+
+  for (let i = 0; i < (files || []).length; i++) {
+    const f = files[i];
+    // readSubmission yields { entityIndex, category, file, name, size } from
+    // both the multipart and the base64 path, so the real blob is f.file.
+    const size = Number(f.size) || 0;
+    const entry = {
+      index: i, name: f.name, size,
+      type: (f.file && f.file.type) || "",
+      entityIndex: f.entityIndex, category: f.category,
+    };
+    if (size > HOLD_FILE_MAX || size > budget) {
+      entry.stored = false;
+      entry.reason = size > HOLD_FILE_MAX ? "over per-file cap" : "over per-submission cap";
+      tooLarge++;
+    } else {
+      try {
+        const buf = await f.file.arrayBuffer();
+        let bin = "";
+        const bytes = new Uint8Array(buf);
+        for (let j = 0; j < bytes.length; j += 0x8000) {
+          bin += String.fromCharCode.apply(null, bytes.subarray(j, j + 0x8000));
+        }
+        await env.LOGS.put(`${HOLD_FILE_PREFIX}${submissionId}:${i}`, btoa(bin));
+        entry.stored = true;
+        budget -= size;
+        stored++;
+      } catch (err) {
+        console.error("could not hold attachment", f.name, String(err));
+        entry.stored = false;
+        entry.reason = "write failed";
+        tooLarge++;
+      }
+    }
+    manifest.push(entry);
+  }
+
+  try {
+    await env.LOGS.put(`${HOLD_PREFIX}${receivedAt}:${submissionId}`,
+      JSON.stringify({ payload, submissionId, receivedAt, account, files: manifest }));
+    console.error("held submission", submissionId, `${stored} attachment(s) kept, ${tooLarge} not`);
+    return { ok: true, filesStored: stored, filesTooLarge: tooLarge };
+  } catch (err) {
+    console.error("could not hold submission", String(err));
+    return { ok: false, filesStored: stored, filesTooLarge: tooLarge };
+  }
+}
+
+async function countHeld(env) {
+  if (!env.LOGS) return 0;
+  try { return (await env.LOGS.list({ prefix: HOLD_PREFIX, limit: 1000 })).keys.length; }
+  catch { return 0; }
+}
+
+async function listHeld(env, limit = 50) {
+  if (!env.LOGS) return [];
+  const out = [];
+  const list = await env.LOGS.list({ prefix: HOLD_PREFIX, limit });
+  for (const key of list.keys) {
+    const raw = await env.LOGS.get(key.name);
+    if (!raw) continue;
+    try {
+      const h = JSON.parse(raw);
+      out.push({
+        key: key.name,
+        submissionId: h.submissionId,
+        receivedAt: h.receivedAt,
+        account: h.account,
+        requester: h.payload && h.payload.requester ? h.payload.requester.email : null,
+        summary: buildSubject(h.payload),
+        attachments: (h.files || []).length,
+        attachmentsHeld: (h.files || []).filter(f => f.stored).length,
+      });
+    } catch { /* unreadable entry; leave it for a human */ }
+  }
+  return out;
+}
+
+// Rebuilds each held submission as the request it originally was and sends it
+// back through handleWebhook, so delivery has exactly one implementation. The
+// original nonce rides along: a held submission never reached the idempotency
+// record, so replaying twice is caught the second time rather than duplicated.
+async function drainHoldQueue(env, ctx, limit = 10) {
+  if (!env.LOGS) return { sent: 0, failed: 0, pending: 0 };
+  if (!Object.values(deliveryChannels(env)).some(Boolean)) {
+    return { sent: 0, failed: 0, pending: await countHeld(env), reason: "no delivery channel yet" };
+  }
+  let sent = 0, failed = 0;
+  const list = await env.LOGS.list({ prefix: HOLD_PREFIX, limit });
+  for (const key of list.keys) {
+    const raw = await env.LOGS.get(key.name);
+    if (!raw) continue;
+    let h;
+    try { h = JSON.parse(raw); } catch { await env.LOGS.delete(key.name); continue; }
+
+    const fd = new FormData();
+    fd.append("payload", JSON.stringify(h.payload));
+    for (const f of h.files || []) {
+      if (!f.stored) continue;
+      const b64 = await env.LOGS.get(`${HOLD_FILE_PREFIX}${h.submissionId}:${f.index}`);
+      if (!b64) continue;
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let j = 0; j < bin.length; j++) bytes[j] = bin.charCodeAt(j);
+      // Rebuild the exact field name readSubmission parses, so a replay is
+      // indistinguishable from the original post.
+      fd.append(`documents[${f.entityIndex}][${f.category}]`,
+                new File([bytes], f.name, { type: f.type || "application/octet-stream" }));
+    }
+
+    const replayReq = new Request(`${env.PUBLIC_BASE_URL || "https://expansion.supy.io"}/webhook`, {
+      method: "POST", body: fd,
+    });
+    let ok = false;
+    try {
+      const res = await handleWebhook(replayReq, env, ctx);
+      ok = res.status >= 200 && res.status < 300;
+      if (res.status === 202) ok = false;   // still nowhere to deliver; leave it held
+    } catch (err) {
+      console.error("replay threw", h.submissionId, String(err));
+    }
+
+    if (ok) {
+      for (const f of h.files || []) {
+        if (f.stored) await env.LOGS.delete(`${HOLD_FILE_PREFIX}${h.submissionId}:${f.index}`);
+      }
+      await env.LOGS.delete(key.name);
+      sent++;
+    } else {
+      failed++;
+      break;   // something is still wrong: stop, keep the rest
+    }
+  }
+  return { sent, failed, pending: await countHeld(env) };
+}
+
 const SHEETS_QUEUE_PREFIX = "sheetq:";
 
 async function postToSheets(env, body, attempts = 2) {
