@@ -2170,7 +2170,7 @@ async function associateSalesDeal(token, dealId, companyIds, contactId, onboardi
 }
 
 function formBaseUrl(env) {
-  return (env.FORM_URL || "https://vaishnavi-supy-io.github.io/supy-expansion/").replace(/\?.*$/, "");
+  return (env.FORM_URL || "https://expansion.supy.io/").replace(/\?.*$/, "");
 }
 
 // ─────────────────────────────────────────────────────────────

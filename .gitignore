@@ -15,3 +15,7 @@ worker/.sheeturl
 worker/.admin-token
 # One-time handoff file for the Slack bot token. Never committed.
 worker/.slacktoken
+
+# Static assets copied in at deploy time by worker/sync-assets.sh.
+# index.html and sample.html at the repo root stay the single source of truth.
+worker/public/

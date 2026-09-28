@@ -662,7 +662,14 @@ const CONFIG = {
   // Single endpoint that receives the request and fans it out downstream.
   // Leave null to run in preview mode: the form validates and shows the exact
   // JSON payload instead of posting it anywhere.
-  webhookUrl: 'https://supy-expansion.vaishnavi-5d1.workers.dev/webhook',
+  // On expansion.supy.io the Worker serves this page and the API, so a relative
+  // path is both correct and CORS-free. On GitHub Pages the Worker is a
+  // different origin and has to be named outright. Opened straight off disk
+  // (file://) there is no origin to be relative to, so name it there too.
+  webhookUrl: (location.protocol === 'https:' || location.protocol === 'http:')
+    && !/(^|\.)github\.io$/i.test(location.hostname)
+      ? '/webhook'
+      : 'https://supy-expansion.vaishnavi-5d1.workers.dev/webhook',
   webhookSecret: null,
   // Optional override via ?api= for local dev. Only localhost is allowed.
   apiOverride: (() => {
