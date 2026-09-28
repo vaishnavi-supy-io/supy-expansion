@@ -38,13 +38,57 @@ same-origin, no CORS.
 
 ### The one thing standing between this and usable
 
-`./setup-secrets.sh` has not been run on this account. `/health` reports
-`sheets: "unset"` and `admin: false`, and the Worker refuses submissions until
-at least one delivery channel has credentials. That is deliberate — a request
-that reaches nobody is worse than one that is turned away — but it does mean
-**the page is publicly reachable and cannot accept a submission.** Nobody has
-been given the URL, so this is not urgent, but do not send the link to anyone
-until secrets are set and a test submission has gone through.
+`/health` reports `sheets: "unset"` and `admin: false`. The Worker refuses
+submissions until a delivery channel has credentials — deliberate, since a
+request that reaches nobody is worse than one turned away. So **the page is
+publicly reachable and cannot accept a submission.** Nobody has been given the
+URL; do not send it to anyone until secrets are set and a test submission has
+gone through.
+
+**The values cannot be copied from the old Worker.** Cloudflare secrets are
+write-only: the API returns names, never values. They have to come from wherever
+they originally did — HubSpot, Slack, Cloudinary. Nothing on the machine that
+built this has them.
+
+**`setup-secrets.sh` was wrong, and is now fixed.** The old, working deployment
+runs with these 11 secrets:
+
+```
+ADMIN_TOKEN             CLOUDINARY_API_KEY      CLOUDINARY_API_SECRET
+CLOUDINARY_CLOUD_NAME   COUNTRY_MANAGERS_JSON   GOOGLE_SCRIPT_URL
+HUBSPOT_ACCESS_TOKEN    RATE_LIMIT              SLACK_BOT_TOKEN
+SLACK_CHANNEL           SLACK_WEBHOOK_URL
+```
+
+The script prompted for `CLIENT_ID` / `CLIENT_SECRET` / `REFRESH_TOKEN` and
+three `GMAIL_*` values, and never asked for `COUNTRY_MANAGERS_JSON`,
+`SLACK_BOT_TOKEN`, `SLACK_CHANNEL` or `RATE_LIMIT`. Following it would have
+produced a Worker that looked configured and could not deliver.
+
+The Worker does support both HubSpot paths — `getHubspotToken()` prefers a
+Private App token (`HUBSPOT_ACCESS_TOKEN` / `HUBSPOT_PAT` / `PAT` /
+`HS_ACCESS_TOKEN`, anything starting `pat-`) and falls back to the OAuth trio.
+Production uses the Private App token, so that is what the script now asks for
+first.
+
+What you need to gather before running it:
+
+| Secret | Where from |
+|---|---|
+| `HUBSPOT_ACCESS_TOKEN` | HubSpot → Settings → Integrations → Private Apps → Auth |
+| `SLACK_WEBHOOK_URL` | api.slack.com/apps → your app → Incoming Webhooks |
+| `CLOUDINARY_*` | Cloudinary console → Dashboard |
+| `COUNTRY_MANAGERS_JSON` | `{"AE":"…@supy.io","SA":"…@supy.io"}` |
+| `GOOGLE_SCRIPT_URL` | `google-apps-script/Code.gs` deployment |
+| `ADMIN_TOKEN` | make a new one: `openssl rand -hex 32` |
+| `SLACK_BOT_TOKEN`, `SLACK_CHANNEL` | optional, enables threaded warnings |
+
+Then:
+
+```bash
+cd worker && ./setup-secrets.sh
+curl -s https://expansion.supy.io/health | python3 -m json.tool
+```
 
 ### Note on `.html` URLs
 
