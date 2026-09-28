@@ -275,7 +275,12 @@ export default {
           catch { /* not fatal */ }
         }
         return json({ ok: true, sheets, queuedForSheets: queued, admin: Boolean(env.ADMIN_TOKEN),
+          // Two different questions, so two different names. The form takes
+          // submissions whatever happens — they are held if there is nowhere to
+          // send them. Whether anything actually leaves the Worker is
+          // deliveringSubmissions, and that is the one that matters.
           acceptingSubmissions: true,
+          deliveringSubmissions: Object.values(deliveryChannels(env)).some(Boolean),
           heldAwaitingDelivery: await countHeld(env),
           slackWarningsThreaded: Boolean(env.SLACK_BOT_TOKEN && env.SLACK_CHANNEL) }, 200, request, env);
       }
@@ -2653,7 +2658,8 @@ function handleDebug(request, env) {
     RATELIMIT_bound:       Boolean(env.RATELIMIT),
     DRAFTS_bound:          Boolean(env.DRAFTS),
     deliveryChannels:      deliveryChannels(env),
-    acceptingSubmissions:  Object.values(deliveryChannels(env)).some(Boolean),
+    acceptingSubmissions:  true,   // always, since submissions are held when undeliverable
+    deliveringSubmissions: Object.values(deliveryChannels(env)).some(Boolean),
   }, 200, request, env);
 }
 
