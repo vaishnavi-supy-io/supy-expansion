@@ -31,16 +31,16 @@ directory = "./public/"
 #
 # The workers.dev hostname stays live alongside this one so the download and
 # resume links already sitting in clients' inboxes keep working.
-[[routes]]
-pattern   = "expansion.supy.io/*"
-zone_name = "supy.io"
-
-# Once DNS is ours to manage, this replaces the block above and Cloudflare
-# creates the record and the certificate itself:
+# A custom domain, not a plain route: Cloudflare creates the DNS record and the
+# certificate itself. That works here because the account holds dns_records:edit
+# — the Workers API makes the record server-side, so wrangler's OAuth token not
+# having a DNS scope of its own does not matter.
 #
-#   [[routes]]
-#   pattern       = "expansion.supy.io"
-#   custom_domain = true
+# Deleting a custom domain does NOT remove its certificate. If this is ever
+# taken down, remove the cert from the dashboard too.
+[[routes]]
+pattern       = "expansion.supy.io"
+custom_domain = true
 
 # Replays anything the Sheets mirror missed while Apps Script was unavailable.
 [triggers]

@@ -25,7 +25,7 @@ request. Scope and timing are still confirmed by a human.
 | Live form | https://vaishnavi-supy-io.github.io/supy-expansion/ |
 | Filled-in sample | https://vaishnavi-supy-io.github.io/supy-expansion/sample.html |
 | Endpoint | `https://supy-expansion.vaishnavi-5d1.workers.dev/webhook` |
-| Moving to | `https://expansion.supy.io` — form and endpoint on one origin. Blocked on one DNS record; see [MIGRATION.md](MIGRATION.md) |
+| New home | https://expansion.supy.io — **live**, form and endpoint on one origin. Not yet accepting submissions: secrets unset. See [MIGRATION.md](MIGRATION.md) |
 
 The form and the Worker are both **deployed and live**. Drafts, prefill links
 and validation work now. Submissions are refused with a clear message until at
