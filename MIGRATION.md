@@ -10,6 +10,42 @@ Cloudflare account.
 
 ---
 
+## Status — 2026-09-28
+
+Deployed to the supy.io account. Not reachable, and not yet functional.
+
+| | |
+|---|---|
+| Worker deployed to `supy.io` account | ✅ version `375c5dcc` |
+| KV namespaces created | ✅ DRAFTS / LOGS / RATELIMIT, ids in `wrangler.toml` |
+| Route attached | ✅ `expansion.supy.io/*` → `supy-expansion` |
+| DNS record | ❌ **blocked** — `dig expansion.supy.io` returns nothing |
+| Secrets | ❌ **not set** — `wrangler secret list` returns `[]` |
+| Drafts copied from the old namespace | ❌ deliberately last, just before cutover |
+
+`https://expansion.supy.io/health` returns nothing at all: the route is attached
+but the hostname does not resolve, so no request ever reaches Cloudflare's edge
+for it. The form on GitHub Pages and the Worker on the personal account are
+untouched and still serving every client.
+
+Two things left, in this order:
+
+1. **Get the DNS record.** The message to send is below. Nothing works until this
+   lands.
+2. **Set the secrets** — `cd worker && ./setup-secrets.sh`. This has to be run by
+   someone who holds the HubSpot, Cloudinary and Slack credentials. Until it is,
+   the Worker refuses submissions by design, which is the correct behaviour for a
+   form that cannot deliver anywhere.
+
+Then copy the drafts, and only then put the redirect stub up.
+
+**Before cutover, disable the cron on the old Worker.** Both Workers now run the
+`*/15` Sheets replay. The new one replays from its own empty `LOGS`, so today it
+is a no-op — but once secrets are set and drafts are copied, two Workers
+replaying against the same sheet is a duplicate-row problem.
+
+---
+
 ## What changes
 
 | | Before | After |
