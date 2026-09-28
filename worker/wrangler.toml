@@ -2,36 +2,91 @@ name = "supy-expansion"
 main = "src/index.js"
 compatibility_date = "2024-09-23"
 
-# ── Non-secret config ─────────────────────────────────────────
-# ALLOWED_ORIGINS locks CORS to the pages that host the form. Leave it out and
-# the Worker accepts any origin, which is fine while testing and not fine once
-# the endpoint is creating CRM records.
-# PUBLIC_BASE_URL is this Worker's own origin, used to build /download links.
+# The Supy org Cloudflare account — the one that holds the supy.io,
+# supy.app and supy.link zones. The Worker used to live on a personal
+# account, which is why it could never be given a supy.io hostname:
+# a zone can only route to Workers in its own account.
+account_id = "f3adfa5ed42dea46fdeb8be255b1cd2b"
+
+# ── The form itself ───────────────────────────────────────────
+# index.html and sample.html live at the repo root so GitHub Pages can keep
+# serving them while the move happens. `npm run deploy` copies them here first
+# (worker/sync-assets.sh); worker/public/ is generated and not committed.
+#
+# A request that matches a file is served as that file without running any
+# Worker code, so "/" and "/sample.html" are the form. Everything else falls
+# through to the fetch handler, which is where /webhook and the rest live.
+# Nothing in the asset directory shares a name with a route, so no
+# run_worker_first entries are needed.
+[assets]
+directory = "./public/"
+
+# ── Where it answers ──────────────────────────────────────────
+# A route, not a custom domain: attaching a route needs Workers Admin, which we
+# have on this account, while creating the DNS record needs a DNS role, which we
+# do not. Someone with DNS rights adds one proxied record for
+# expansion.supy.io first — see MIGRATION.md — and this route then picks it up.
+# This is the same shape as the oculus.ops.supy.io/api/* route already on the
+# zone.
+#
+# The workers.dev hostname stays live alongside this one so the download and
+# resume links already sitting in clients' inboxes keep working.
+[[routes]]
+pattern   = "expansion.supy.io/*"
+zone_name = "supy.io"
+
+# Once DNS is ours to manage, this replaces the block above and Cloudflare
+# creates the record and the certificate itself:
+#
+#   [[routes]]
+#   pattern       = "expansion.supy.io"
+#   custom_domain = true
+
 # Replays anything the Sheets mirror missed while Apps Script was unavailable.
 [triggers]
 crons = ["*/15 * * * *"]
 
+# ── Non-secret config ─────────────────────────────────────────
+# ALLOWED_ORIGINS locks CORS to the pages that host the form. GitHub Pages stays
+# on the list until the old URL is retired; after that the form and the API are
+# the same origin and CORS stops mattering at all.
+# PUBLIC_BASE_URL is this Worker's own origin, used to build /download links.
 [vars]
-ALLOWED_ORIGINS = "https://vaishnavi-supy-io.github.io"
-PUBLIC_BASE_URL = "https://supy-expansion.vaishnavi-5d1.workers.dev"
-FORM_URL        = "https://vaishnavi-supy-io.github.io/supy-expansion/"
+ALLOWED_ORIGINS = "https://expansion.supy.io,https://vaishnavi-supy-io.github.io"
+PUBLIC_BASE_URL = "https://expansion.supy.io"
+FORM_URL        = "https://expansion.supy.io/"
+
+# ── KV ────────────────────────────────────────────────────────
+# WARNING: the three ids below belong to the OLD personal account and will not
+# resolve here. Namespace ids are account-scoped, so they have to be recreated
+# on this account and the new ids pasted in before the first deploy:
+#
+#   npx wrangler kv namespace create DRAFTS
+#   npx wrangler kv namespace create LOGS
+#   npx wrangler kv namespace create RATELIMIT
+#
+# DRAFTS holds live 30-day resume links. Copy those keys across before cutover
+# or clients mid-request lose their drafts — see MIGRATION.md.
 
 # ── KV: saved drafts, resumable for 30 days ───────────────────
 [[kv_namespaces]]
 binding = "DRAFTS"
-id      = "32de3d0e21bd4681b3a8d9c07dd6b4d8"
+id      = "REPLACE_ME_DRAFTS"        # old personal-account id: 32de3d0e21bd4681b3a8d9c07dd6b4d8
 
 # ── KV: rolling log of the last 200 submissions ───────────────
 [[kv_namespaces]]
 binding = "LOGS"
-id      = "32c6d79319ef4a07a1c0e0645ccd2721"
+id      = "REPLACE_ME_LOGS"          # old personal-account id: 32c6d79319ef4a07a1c0e0645ccd2721
 
 # ── KV: per-IP rate limit, and the idempotency record ─────────
 [[kv_namespaces]]
 binding = "RATELIMIT"
-id      = "f3c41ed69e184e68b1ae6716825b776f"
+id      = "REPLACE_ME_RATELIMIT"     # old personal-account id: f3c41ed69e184e68b1ae6716825b776f
 
 # ── Secrets — set via CLI, never written in this file ─────────
+# These do NOT carry over from the old account. Re-run worker/setup-secrets.sh
+# once the namespaces above exist:
+#
 #   npx wrangler secret put CLIENT_ID              # HubSpot OAuth
 #   npx wrangler secret put CLIENT_SECRET
 #   npx wrangler secret put REFRESH_TOKEN

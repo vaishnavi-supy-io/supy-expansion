@@ -80,7 +80,12 @@ console.log('\n=== draft + idempotency wiring present ===');
 check('save button exists', Boolean(d.getElementById('saveBtn')), true);
 check('resume reads ?draft=', html.includes("get('draft')"), true);
 check('payload carries a nonce', html.includes('submissionNonce'), true);
-check('endpoint is configured', /webhookUrl:\s*'https:\/\//.test(html), true);
+// The endpoint is origin-aware now: relative on expansion.supy.io, absolute on
+// GitHub Pages and file://. Assert both arms are present, and that the page
+// jsdom loaded (https://example.test/) resolves to the same-origin one.
+check('endpoint has a same-origin arm', /\?\s*'\/webhook'/.test(html), true);
+check('endpoint has a cross-origin fallback', /:\s*'https:\/\/[^']*\/webhook'/.test(html), true);
+check('endpoint resolves same-origin here', dom.window.eval("CONFIG.webhookUrl"), '/webhook');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
