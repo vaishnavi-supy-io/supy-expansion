@@ -71,17 +71,17 @@ FORM_URL        = "https://expansion.supy.io/"
 # ── KV: saved drafts, resumable for 30 days ───────────────────
 [[kv_namespaces]]
 binding = "DRAFTS"
-id      = "REPLACE_ME_DRAFTS"        # old personal-account id: 32de3d0e21bd4681b3a8d9c07dd6b4d8
+id      = "2848982e9a3142398c8ebf2a8efaffbf"        # old personal-account id: 32de3d0e21bd4681b3a8d9c07dd6b4d8
 
 # ── KV: rolling log of the last 200 submissions ───────────────
 [[kv_namespaces]]
 binding = "LOGS"
-id      = "REPLACE_ME_LOGS"          # old personal-account id: 32c6d79319ef4a07a1c0e0645ccd2721
+id      = "3f376f1e88b5469fb645c37a228ebcde"          # old personal-account id: 32c6d79319ef4a07a1c0e0645ccd2721
 
 # ── KV: per-IP rate limit, and the idempotency record ─────────
 [[kv_namespaces]]
 binding = "RATELIMIT"
-id      = "REPLACE_ME_RATELIMIT"     # old personal-account id: f3c41ed69e184e68b1ae6716825b776f
+id      = "f1d30ab8ca4649f78a4097dcc555c527"     # old personal-account id: f3c41ed69e184e68b1ae6716825b776f
 
 # ── Secrets — set via CLI, never written in this file ─────────
 # These do NOT carry over from the old account. Re-run worker/setup-secrets.sh
