@@ -12,83 +12,75 @@ Cloudflare account.
 
 ## Status — 2026-09-28
 
-**`https://expansion.supy.io` is live.** It serves the form and answers the API
-on one origin. It cannot yet deliver a submission anywhere.
+**`https://expansion.supy.io` is live and working.** Everything that does not
+need a credential is done. It refuses submissions, and that is the correct
+behaviour until delivery credentials exist.
 
 | | |
 |---|---|
-| Worker deployed to `supy.io` account | ✅ version `dd89b640` |
-| KV namespaces created | ✅ ids in `wrangler.toml` |
-| Custom domain + DNS record | ✅ `expansion.supy.io` → `supy-expansion` |
-| Certificate | ✅ HTTP/2 200 over TLS |
-| Drafts copied | ⚠️ first pass done — **re-run at cutover** |
-| Secrets | ❌ **not set** — `wrangler secret list` returns `[]` |
+| Worker on the `supy.io` account | ✅ |
+| KV namespaces | ✅ bound: DRAFTS, LOGS, RATELIMIT |
+| Custom domain, DNS, certificate | ✅ |
+| Drafts copied | ✅ re-synced — **run once more at cutover** |
+| `ADMIN_TOKEN` | ✅ generated, set, saved to `worker/.admin-token` (gitignored, 0600) |
+| `RATE_LIMIT` | ✅ 500 |
+| Delivery credentials | ❌ **the only thing left** |
 
-Verified:
-
-```
-dig +short expansion.supy.io      → 172.66.43.18, 172.66.40.238
-GET /health                       → {"ok":true,"sheets":"unset","admin":false,…}
-GET /                             → <title>Expansion Request | Supy</title>  (96 KB)
-GET /sample.html                  → 307 → /sample → 200
-```
-
-The form's `webhookUrl` resolves to `/webhook` on this host, as intended —
-same-origin, no CORS.
-
-### The one thing standing between this and usable
-
-`/health` reports `sheets: "unset"` and `admin: false`. The Worker refuses
-submissions until a delivery channel has credentials — deliberate, since a
-request that reaches nobody is worse than one turned away. So **the page is
-publicly reachable and cannot accept a submission.** Nobody has been given the
-URL; do not send it to anyone until secrets are set and a test submission has
-gone through.
-
-**The values cannot be copied from the old Worker.** Cloudflare secrets are
-write-only: the API returns names, never values. They have to come from wherever
-they originally did — HubSpot, Slack, Cloudinary. Nothing on the machine that
-built this has them.
-
-**`setup-secrets.sh` was wrong, and is now fixed.** The old, working deployment
-runs with these 11 secrets:
+Verified end to end. A real multipart POST, exactly as the form sends one:
 
 ```
-ADMIN_TOKEN             CLOUDINARY_API_KEY      CLOUDINARY_API_SECRET
-CLOUDINARY_CLOUD_NAME   COUNTRY_MANAGERS_JSON   GOOGLE_SCRIPT_URL
-HUBSPOT_ACCESS_TOKEN    RATE_LIMIT              SLACK_BOT_TOKEN
-SLACK_CHANNEL           SLACK_WEBHOOK_URL
+POST /webhook  → 503
+{"status":"error","message":"This form is not accepting submissions yet.
+ Please contact your Supy customer success manager directly so your request
+ is not lost."}
 ```
 
-The script prompted for `CLIENT_ID` / `CLIENT_SECRET` / `REFRESH_TOKEN` and
-three `GMAIL_*` values, and never asked for `COUNTRY_MANAGERS_JSON`,
-`SLACK_BOT_TOKEN`, `SLACK_CHANNEL` or `RATE_LIMIT`. Following it would have
-produced a Worker that looked configured and could not deliver.
+That is the Worker parsing the payload, validating it, finding no delivery
+channel and turning the request away by design. Routing, assets, KV bindings and
+request handling all work.
 
-The Worker does support both HubSpot paths — `getHubspotToken()` prefers a
-Private App token (`HUBSPOT_ACCESS_TOKEN` / `HUBSPOT_PAT` / `PAT` /
-`HS_ACCESS_TOKEN`, anything starting `pat-`) and falls back to the OAuth trio.
-Production uses the Private App token, so that is what the script now asks for
-first.
+```
+GET /health  → {"ok":true,"sheets":"unset","admin":true,…}
+GET /geo     → {"country":"IN","cfCountry":"IN","headerCountry":"IN"}
+GET /debug   → acceptingSubmissions: false
+```
 
-What you need to gather before running it:
+### What is left, and why nobody else can do it
+
+Cloudflare secrets are write-only — the API returns names, never values — so
+nothing could be copied from the old Worker. These have to come from source:
 
 | Secret | Where from |
 |---|---|
-| `HUBSPOT_ACCESS_TOKEN` | HubSpot → Settings → Integrations → Private Apps → Auth |
+| `HUBSPOT_ACCESS_TOKEN` | HubSpot → Settings → Integrations → Private Apps → Auth (`pat-…`) |
 | `SLACK_WEBHOOK_URL` | api.slack.com/apps → your app → Incoming Webhooks |
-| `CLOUDINARY_*` | Cloudinary console → Dashboard |
+| `CLOUDINARY_CLOUD_NAME` / `_API_KEY` / `_API_SECRET` | Cloudinary console → Dashboard |
 | `COUNTRY_MANAGERS_JSON` | `{"AE":"…@supy.io","SA":"…@supy.io"}` |
-| `GOOGLE_SCRIPT_URL` | `google-apps-script/Code.gs` deployment |
-| `ADMIN_TOKEN` | make a new one: `openssl rand -hex 32` |
-| `SLACK_BOT_TOKEN`, `SLACK_CHANNEL` | optional, enables threaded warnings |
+| `GOOGLE_SCRIPT_URL` | the `google-apps-script/Code.gs` deployment |
+| `SLACK_BOT_TOKEN`, `SLACK_CHANNEL` | optional — enables threaded warnings |
 
-Then:
+`ADMIN_TOKEN` and `RATE_LIMIT` are already set; skip them when the script asks.
 
 ```bash
 cd worker && ./setup-secrets.sh
-curl -s https://expansion.supy.io/health | python3 -m json.tool
+curl -s https://expansion.supy.io/health | python3 -m json.tool   # sheets should stop saying "unset"
 ```
+
+### Then, and only then
+
+These three steps are deliberately **not** done, because doing them before
+secrets exist would break the system that is currently serving clients:
+
+1. **Test a real submission** on the new domain. Confirm it reaches HubSpot,
+   Slack and the sheet.
+2. **Re-run the drafts copy** — catches anything saved in the meantime.
+3. **Disable the `*/15` cron on the old Worker.** Doing this early would strip
+   the Sheets-replay safety net from the deployment still serving every client.
+   Doing it late means two Workers replaying against one sheet — duplicate rows.
+   It belongs exactly at cutover.
+4. **Put the redirect stub up** on GitHub Pages. Doing this early replaces a
+   working form with a redirect to one that refuses submissions. Leave it up for
+   30 days afterwards.
 
 ### Note on `.html` URLs
 
