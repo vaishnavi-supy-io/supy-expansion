@@ -12,37 +12,59 @@ Cloudflare account.
 
 ## Status — 2026-09-28
 
-Deployed to the supy.io account. Not reachable, and not yet functional.
+**`https://expansion.supy.io` is live.** It serves the form and answers the API
+on one origin. It cannot yet deliver a submission anywhere.
 
 | | |
 |---|---|
-| Worker deployed to `supy.io` account | ✅ version `375c5dcc` |
-| KV namespaces created | ✅ DRAFTS / LOGS / RATELIMIT, ids in `wrangler.toml` |
-| Route attached | ✅ `expansion.supy.io/*` → `supy-expansion` |
-| DNS record | ❌ not created — but **you have the rights**, see below |
+| Worker deployed to `supy.io` account | ✅ version `dd89b640` |
+| KV namespaces created | ✅ ids in `wrangler.toml` |
+| Custom domain + DNS record | ✅ `expansion.supy.io` → `supy-expansion` |
+| Certificate | ✅ HTTP/2 200 over TLS |
+| Drafts copied | ⚠️ first pass done — **re-run at cutover** |
 | Secrets | ❌ **not set** — `wrangler secret list` returns `[]` |
-| Drafts copied from the old namespace | ⚠️ first pass done (1 key) — **re-run at cutover** |
 
-`https://expansion.supy.io/health` returns nothing at all: the route is attached
-but the hostname does not resolve, so no request ever reaches Cloudflare's edge
-for it. The form on GitHub Pages and the Worker on the personal account are
-untouched and still serving every client.
+Verified:
 
-Two things left, in this order:
+```
+dig +short expansion.supy.io      → 172.66.43.18, 172.66.40.238
+GET /health                       → {"ok":true,"sheets":"unset","admin":false,…}
+GET /                             → <title>Expansion Request | Supy</title>  (96 KB)
+GET /sample.html                  → 307 → /sample → 200
+```
 
-1. **Create the DNS record.** Thirty seconds in the dashboard; you hold
-   `dns_records: edit`. Nothing works until this lands.
-2. **Set the secrets** — `cd worker && ./setup-secrets.sh`. This has to be run by
-   someone who holds the HubSpot, Cloudinary and Slack credentials. Until it is,
-   the Worker refuses submissions by design, which is the correct behaviour for a
-   form that cannot deliver anywhere.
+The form's `webhookUrl` resolves to `/webhook` on this host, as intended —
+same-origin, no CORS.
 
-Then copy the drafts, and only then put the redirect stub up.
+### The one thing standing between this and usable
 
-**Before cutover, disable the cron on the old Worker.** Both Workers now run the
-`*/15` Sheets replay. The new one replays from its own empty `LOGS`, so today it
-is a no-op — but once secrets are set and drafts are copied, two Workers
-replaying against the same sheet is a duplicate-row problem.
+`./setup-secrets.sh` has not been run on this account. `/health` reports
+`sheets: "unset"` and `admin: false`, and the Worker refuses submissions until
+at least one delivery channel has credentials. That is deliberate — a request
+that reaches nobody is worse than one that is turned away — but it does mean
+**the page is publicly reachable and cannot accept a submission.** Nobody has
+been given the URL, so this is not urgent, but do not send the link to anyone
+until secrets are set and a test submission has gone through.
+
+### Note on `.html` URLs
+
+Cloudflare's asset serving strips the extension by default
+(`html_handling: "auto-trailing-slash"`), so `/sample.html` 307s to `/sample`.
+Both work. Set `html_handling = "none"` under `[assets]` if exact paths ever
+matter.
+
+### Still to do, in order
+
+1. **Set the secrets** — `cd worker && ./setup-secrets.sh`. Needs whoever holds
+   the HubSpot, Cloudinary and Slack credentials.
+2. **Test a real submission** end to end on the new domain.
+3. **Re-run the drafts copy** to catch anything saved in the meantime.
+4. **Disable the `*/15` cron on the old Worker.** Both run the Sheets replay.
+   It is a no-op today because the new `LOGS` is empty; once secrets are set, two
+   Workers replaying against the same sheet is a duplicate-row problem.
+5. **Put the redirect stub up** on GitHub Pages, and leave it for 30 days.
+
+The old form and Worker are untouched and still serving every client.
 
 ---
 
