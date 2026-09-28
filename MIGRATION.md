@@ -19,7 +19,7 @@ Deployed to the supy.io account. Not reachable, and not yet functional.
 | Worker deployed to `supy.io` account | ✅ version `375c5dcc` |
 | KV namespaces created | ✅ DRAFTS / LOGS / RATELIMIT, ids in `wrangler.toml` |
 | Route attached | ✅ `expansion.supy.io/*` → `supy-expansion` |
-| DNS record | ❌ **blocked** — `dig expansion.supy.io` returns nothing |
+| DNS record | ❌ not created — but **you have the rights**, see below |
 | Secrets | ❌ **not set** — `wrangler secret list` returns `[]` |
 | Drafts copied from the old namespace | ⚠️ first pass done (1 key) — **re-run at cutover** |
 
@@ -30,8 +30,8 @@ untouched and still serving every client.
 
 Two things left, in this order:
 
-1. **Get the DNS record.** The message to send is below. Nothing works until this
-   lands.
+1. **Create the DNS record.** Thirty seconds in the dashboard; you hold
+   `dns_records: edit`. Nothing works until this lands.
 2. **Set the secrets** — `cd worker && ./setup-secrets.sh`. This has to be run by
    someone who holds the HubSpot, Cloudinary and Slack credentials. Until it is,
    the Worker refuses submissions by design, which is the correct behaviour for a
@@ -67,44 +67,58 @@ zone.
 
 ---
 
-## The one thing we cannot do ourselves
+## DNS: you can do this yourself
 
-Our role on the `supy.io` account is `Workers Admin` + `Workers Platform Admin`
-+ `Developer Platform Admin`. That is enough to deploy the Worker and attach the
-route. It does not include DNS:
+An earlier version of this document said DNS belonged to someone else. That was
+wrong, and the mistake is worth recording so nobody repeats it.
+
+The evidence was a 403:
 
 ```
-GET /zones/{supy.io}/workers/routes  → 200  ✅
-GET /zones/{supy.io}/dns_records     → 403  Authentication error  ❌
+GET /zones/{supy.io}/dns_records  → 403  Authentication error
 ```
 
-So someone with DNS rights on the `supy.io` zone has to create one record. This
-is the same arrangement as the `oculus.ops.supy.io/api/*` route already on the
-zone — that record was created by someone else too, and the Worker route
-attached to it afterwards.
+That 403 is about the **token**, not the person. Wrangler's OAuth token requests
+`zone:read` and no DNS scope whatsoever, so that call fails for everyone. The
+actual role on the supy.io account says otherwise:
 
-### Message to send
+```
+dns_records    {"edit": true, "read": true}
+worker         {"edit": true, "read": true}
+zone           {"edit": false, "read": true}
+domain         {"edit": false, "read": true}
+```
 
-> Could I get one DNS record added on the `supy.io` zone?
->
-> **Record:** `AAAA` · name `expansion` · content `100::` · **proxied**
->
-> It's the standard placeholder for a Cloudflare Worker route — `100::` is the
-> IPv6 discard prefix, so nothing is ever actually routed to it. The proxy
-> intercepts the request and hands it to the Worker before it goes anywhere.
->
-> It's for the client expansion-request form, which currently lives on a
-> personal GitHub Pages URL. No change to `supy.io` or `www` — the Webflow site
-> is untouched. I have Workers Admin on the account and will attach the route
-> myself once the record exists.
->
-> If you'd rather do it in one step: **Workers & Pages → supy-expansion →
-> Settings → Domains & Routes → Add Custom Domain → `expansion.supy.io`**
-> creates the DNS record *and* the certificate automatically. Tell me if you go
-> that way and I'll adjust the config.
+DNS edit and Worker edit, which is everything this migration needs. Note these
+are account-level permissions; an Enterprise account can scope a role to
+particular zones, and that would not show up here. If the dashboard lets you
+save the record, the rights were real.
 
-If they take the Custom Domain route, swap the `[[routes]]` block in
-`worker/wrangler.toml` for the commented-out `custom_domain` version below it.
+Because `wrangler` cannot reach DNS with an OAuth token, the record is made in
+the dashboard — or with an API token carrying `Zone.DNS:Edit`, which is worth
+creating only if this needs to be scripted.
+
+### Option A — Custom Domain (one action, recommended)
+
+**Workers & Pages → supy-expansion → Settings → Domains & Routes → Add →
+Custom Domain → `expansion.supy.io`**
+
+Creates the DNS record *and* the certificate together. Then swap the
+`[[routes]]` block in `worker/wrangler.toml` for the `custom_domain = true`
+version commented out beneath it, and redeploy.
+
+### Option B — placeholder record, keep the existing route
+
+**DNS → supy.io → Add record → `AAAA` · name `expansion` · content `100::` ·
+Proxied**
+
+`100::` is the IPv6 discard prefix; nothing is ever routed to it. The proxy
+intercepts the request and hands it to the Worker first. The route is already
+attached, so no redeploy is needed — it starts working the moment the record
+saves.
+
+Either way, `supy.io` and `www` stay on Webflow. This adds one subdomain and
+changes nothing else on the zone.
 
 ---
 
