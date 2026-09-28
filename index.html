@@ -1537,27 +1537,51 @@ async function submitRequest(){
       }
 
       const res = await fetch(effectiveUrl, { method:'POST', headers, body });
-      if (!res.ok) throw new Error('Endpoint returned ' + res.status);
+      if (!res.ok){
+        // The Worker explains itself in the body, and its explanation is worth
+        // more than the status code: a 503 because no delivery channel is
+        // configured tells the client to call their CSM so the request is not
+        // lost. Show that instead of "Endpoint returned 503".
+        let msg = 'Could not submit: the endpoint returned ' + res.status + '.';
+        let retry = true;
+        try {
+          const j = await res.json();
+          // Only a rate limit is worth trying again in a moment. Anything else
+          // the server names is a standing condition, and telling someone to
+          // retry it is worse than saying nothing.
+          if (j && j.message) { msg = j.message; retry = res.status === 429; }
+        } catch { /* no JSON body — keep the status line */ }
+        const e = new Error(msg); e.retry = retry; throw e;
+      }
+      // 202 means the Worker recorded the request but has nowhere to deliver it
+      // yet. It is genuinely safe — held with its attachments, replayed when a
+      // channel exists — but saying "we will confirm within one business day"
+      // would be a promise nobody has heard yet. Use the server's own wording.
+      let heldMsg = null;
+      if (res.status === 202){
+        try { const j = await res.json(); if (j && j.status === 'held') heldMsg = j.message; } catch {}
+      }
       submissionNonce = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID().replace(/-/g,'') : String(Date.now()) + Math.random().toString(36).slice(2,10);
       clearProgress();
-      showDone(payload, false);
+      showDone(payload, false, heldMsg);
     } else {
       showDone(payload, true);
     }
   } catch (err){
     btn.disabled = false;
     btn.textContent = 'Submit request';
-    showTop('Could not submit: ' + err.message + '. Nothing was sent, so your answers are still here. Try again in a moment.');
+    showTop(err.message + ' Nothing was sent, so your answers are still here.'
+            + (err.retry === false ? '' : ' Try again in a moment.'));
     if (typeof window.scrollTo === 'function') window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 }
 
-function showDone(payload, preview){
+function showDone(payload, preview, heldMsg){
   $('formView').hidden = true;
   $('doneView').hidden = false;
   $('doneMsg').textContent = preview
     ? 'Validation passed and the payload below is ready to post. Set CONFIG.webhookUrl to send it for real.'
-    : 'We will confirm scope and timeline within one business day, and flag anything else needed from you.';
+    : (heldMsg || 'We will confirm scope and timeline within one business day, and flag anything else needed from you.');
   $('doneDest').textContent = preview
     ? 'Preview mode: nothing was submitted.' +
       (allFiles().length ? ' The ' + allFiles().length + ' attached file(s) are listed in the payload but not uploaded.' : '')
