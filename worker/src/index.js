@@ -1210,8 +1210,18 @@ function crmCompanyName(p) {
  // PAT is sent as Bearer token directly, no refresh needed.
 // ─────────────────────────────────────────────────────────────
 async function getHubspotToken(env) {
-  const pat = env.HUBSPOT_ACCESS_TOKEN || env.HUBSPOT_PAT || env.PAT || env.HS_ACCESS_TOKEN;
-  if (pat && pat.startsWith("pat-")) return pat.trim();
+  // Trim BEFORE the shape check, not after. A value pasted with a trailing
+  // newline used to fail startsWith, fall through to the OAuth branch, find no
+  // CLIENT_ID and return null - reported as hubspot:auth-fail, which reads like
+  // a rejected token rather than one that was never sent.
+  const pat = str(env.HUBSPOT_ACCESS_TOKEN || env.HUBSPOT_PAT || env.PAT || env.HS_ACCESS_TOKEN).trim();
+  if (pat) {
+    // Case-insensitive: the prefix identifies the credential type, and a
+    // console that displays it capitalised should not silently disable CRM.
+    if (/^pat-/i.test(pat)) return pat;
+    console.error(`HubSpot token is set but does not look like a private app token `
+      + `(${pat.length} chars, starts "${pat.slice(0, 4)}"). Expected it to begin "pat-".`);
+  }
   if (!env.CLIENT_ID || !env.CLIENT_SECRET || !env.REFRESH_TOKEN) {
     console.error("HubSpot credentials not configured");
     return null;
