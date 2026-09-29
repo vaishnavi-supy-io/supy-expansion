@@ -23,6 +23,9 @@
  *
  *   GMAIL_CLIENT_ID/_SECRET/_REFRESH_TOKEN       Gmail OAuth, for the receipt emails
  *   GOOGLE_SCRIPT_URL                            Apps Script web app, for the Sheets mirror
+ *   GOOGLE_OAUTH_CLIENT_ID/_SECRET/              Optional. Calls the Apps Script as a supy.io
+ *   GOOGLE_OAUTH_REFRESH_TOKEN                   user, which a deployment shared "Anyone within
+ *                                                <domain>" requires. Omit for a public one.
  *   FORM_URL                                     Where the form is hosted, used to build
  *                                                draft and prefill links.
  *
@@ -194,7 +197,7 @@ export default {
       const warmUrl = env.RETAILER_SHEET_URL || env.USER_ACCESS_SHEET_URL || env.GOOGLE_SCRIPT_URL;
       if (warmUrl) {
         try {
-          await fetch(warmUrl, { signal: AbortSignal.timeout(20000) });
+          await fetch(warmUrl, { headers: await googleAuthHeaders(env), signal: AbortSignal.timeout(20000) });
         } catch (e) { console.error("access sheet warm-up failed", String(e)); }
       }
     })());
@@ -253,6 +256,14 @@ export default {
         }
         return json(await drainHoldQueue(env, ctx, 25), 200, request, env);
       }
+      // The record as a spreadsheet. Same admin guard as /pending: these rows
+      // carry client contact details.
+      if (url.pathname === "/export.csv" && request.method === "GET") {
+        if (!env.ADMIN_TOKEN || request.headers.get("x-admin-token") !== env.ADMIN_TOKEN) {
+          return json({ error: "Unauthorized" }, 401, request, env);
+        }
+        return await handleExportCsv(request, env);
+      }
       if (url.pathname === "/logs" && request.method === "GET") {
         return await handleLogs(request, env);
       }
@@ -269,12 +280,24 @@ export default {
           try { sheets = new URL(env.GOOGLE_SCRIPT_URL).host; }
           catch { sheets = `invalid (${env.GOOGLE_SCRIPT_URL.length} chars, not a URL)`; }
         }
+        // How many rows the durable record holds. Null when D1 is not bound.
+        let recorded = null;
+        if (env.DB) {
+          try { recorded = (await env.DB.prepare("SELECT COUNT(*) AS n FROM submissions").first()).n; }
+          catch (e) { recorded = `error: ${String(e).slice(0, 60)}`; }
+        }
         let queued = null;
         if (env.LOGS) {
           try { queued = (await env.LOGS.list({ prefix: SHEETS_QUEUE_PREFIX, limit: 1000 })).keys.length; }
           catch { /* not fatal */ }
         }
         return json({ ok: true, sheets, queuedForSheets: queued, admin: Boolean(env.ADMIN_TOKEN),
+          // The durable record on Cloudflare, independent of the Sheets mirror.
+          recordStore: env.DB ? "d1" : "none",
+          recordedSubmissions: recorded,
+          // Whether the Apps Script calls carry a supy.io identity. A
+          // domain-restricted deployment needs this; a public one ignores it.
+          sheetsAuthenticated: Boolean(env.GOOGLE_OAUTH_CLIENT_ID && env.GOOGLE_OAUTH_CLIENT_SECRET && env.GOOGLE_OAUTH_REFRESH_TOKEN),
           // Two different questions, so two different names. The form takes
           // submissions whatever happens — they are held if there is nowhere to
           // send them. Whether anything actually leaves the Worker is
@@ -2018,11 +2041,71 @@ const isDraftKey  = k => typeof k === "string" && /^[a-f0-9]{40}$/.test(k);
 const SHEET_TIMEOUT_MS = 10000;
 const SHEET_BACKGROUND_TIMEOUT_MS = 25000;
 
-async function readAccessSheet(sheetUrl, email, timeoutMs) {
+// ─────────────────────────────────────────────────────────────
+// Google identity for the Apps Script calls
+//
+// The deployment is shared "Anyone within Supy". That is a statement about
+// identity, not permission: it refuses anonymous callers, and a Worker is
+// anonymous, so Google answers 200 with a sign-in page rather than JSON.
+// Presenting a supy.io access token satisfies the restriction without opening
+// the deployment to the world and without a Workspace admin change.
+//
+// With these secrets unset the header is simply omitted and every call behaves
+// exactly as it did before, so this cannot regress a deployment that is
+// already shared publicly.
+// ─────────────────────────────────────────────────────────────
+let googleToken = null;                    // { value, expiresAt }, per isolate
+const GOOGLE_TOKEN_SKEW_MS = 60 * 1000;
+
+async function getGoogleToken(env) {
+  if (!env.GOOGLE_OAUTH_CLIENT_ID || !env.GOOGLE_OAUTH_CLIENT_SECRET || !env.GOOGLE_OAUTH_REFRESH_TOKEN) return null;
+  // Access tokens last an hour. Minting one per lookup would add a round trip
+  // to a path that already runs against a 10s budget, so it is held per
+  // isolate and refreshed a minute before it expires.
+  if (googleToken && googleToken.expiresAt > Date.now() + GOOGLE_TOKEN_SKEW_MS) return googleToken.value;
+  try {
+    const r = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type:    "refresh_token",
+        client_id:     env.GOOGLE_OAUTH_CLIENT_ID,
+        client_secret: env.GOOGLE_OAUTH_CLIENT_SECRET,
+        refresh_token: env.GOOGLE_OAUTH_REFRESH_TOKEN,
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) {
+      // A revoked or expired refresh token lands here. Say so plainly: the
+      // symptom downstream is an unparseable body, which reads like a broken
+      // deployment rather than a credential that needs reissuing.
+      console.error("Google token refresh failed", r.status, (await r.text()).slice(0, 200));
+      googleToken = null;
+      return null;
+    }
+    const j = await r.json();
+    if (!j.access_token) { console.error("Google token refresh returned no access_token"); googleToken = null; return null; }
+    googleToken = { value: j.access_token, expiresAt: Date.now() + (Number(j.expires_in) || 3600) * 1000 };
+    return googleToken.value;
+  } catch (err) {
+    console.error("Google token refresh threw", String(err));
+    googleToken = null;
+    return null;
+  }
+}
+
+// The Authorization header for an Apps Script call, or nothing when the
+// OAuth secrets are absent.
+async function googleAuthHeaders(env) {
+  const t = await getGoogleToken(env);
+  return t ? { Authorization: `Bearer ${t}` } : {};
+}
+
+async function readAccessSheet(env, sheetUrl, email, timeoutMs) {
   const sep = sheetUrl.includes("?") ? "&" : "?";
   try {
     const r = await fetch(`${sheetUrl}${sep}email=${encodeURIComponent(email)}`,
-      { signal: AbortSignal.timeout(timeoutMs) });
+      { headers: await googleAuthHeaders(env), signal: AbortSignal.timeout(timeoutMs) });
     if (!r.ok) { console.error("access sheet returned", r.status); return { list: null }; }
     const j = await r.json().catch(() => null);
     if (!j)       { console.error("access sheet returned unparseable body"); return { list: null }; }
@@ -2083,7 +2166,7 @@ async function handleRetailers(request, env, ctx) {
   const sheetUrls = [env.RETAILER_SHEET_URL, env.USER_ACCESS_SHEET_URL, env.GOOGLE_SCRIPT_URL].filter(Boolean);
   let timedOut = false;
   for (const sheetUrl of sheetUrls) {
-    const got = await readAccessSheet(sheetUrl, email, SHEET_TIMEOUT_MS);
+    const got = await readAccessSheet(env, sheetUrl, email, SHEET_TIMEOUT_MS);
     if (got.timedOut) { timedOut = true; continue; }
     if (!got.list) continue;                 // unreachable, or not the access sheet
     retailers = got.list;
@@ -2096,7 +2179,7 @@ async function handleRetailers(request, env, ctx) {
     if (ctx && typeof ctx.waitUntil === "function" && env.DRAFTS) {
       ctx.waitUntil((async () => {
         for (const sheetUrl of sheetUrls) {
-          const late = await readAccessSheet(sheetUrl, email, SHEET_BACKGROUND_TIMEOUT_MS);
+          const late = await readAccessSheet(env, sheetUrl, email, SHEET_BACKGROUND_TIMEOUT_MS);
           if (!late.list) continue;
           const body = { retailers: late.list, source: late.list.length ? "sheet" : "sheet-no-match" };
           try { await env.DRAFTS.put(cacheKey, JSON.stringify(body), { expirationTtl: late.list.length ? 600 : 60 }); } catch {}
@@ -2301,6 +2384,13 @@ async function logToSheets(env, p, documents, receivedAt, submissionId, bundle, 
         rows,
   };
 
+  // The durable record, written before the mirror is attempted and on its own
+  // failure path. When the Apps Script is unreachable — which it is whenever
+  // the deployment cannot be shared with an anonymous caller — the submission
+  // is still recorded somewhere permanent and queryable.
+  const stored = await saveToD1(env, body, rows);
+  if (!stored && !env.DB) console.error("no D1 binding; the row exists only in the sheet queue");
+
   // No receiver configured is not a reason to lose the row - it is queued and
   // the cron replays it once one exists. An empty secret is easy to create by
   // accident, because `wrangler secret put` reports success for an empty prompt
@@ -2480,13 +2570,120 @@ async function drainHoldQueue(env, ctx, limit = 10) {
 
 const SHEETS_QUEUE_PREFIX = "sheetq:";
 
+// ─────────────────────────────────────────────────────────────
+// D1: the durable record
+//
+// The Sheets mirror needs an Apps Script deployment reachable by an anonymous
+// caller, and Workspace policy will not allow one. D1 sits on this Cloudflare
+// account, so it needs no external account, no sharing and no admin change.
+//
+// This is deliberately NOT a delivery channel. A recorded row is not the same
+// as somebody being told, so it must not satisfy the check that decides
+// whether a submission can be accepted or has to be held.
+// ─────────────────────────────────────────────────────────────
+
+// The scalar columns, in order. One list drives the insert and the export, so
+// the two cannot drift apart.
+const D1_COLUMNS = [
+  ["submission_id",        b => b.submissionId],
+  ["received_at",          b => b.receivedAt],
+  ["summary",              b => b.summary || ""],
+  ["account",              b => b.account || ""],
+  ["contact_name",         b => b.contactName || ""],
+  ["contact_email",        b => b.contactEmail || ""],
+  ["contact_phone",        b => b.contactPhone || ""],
+  ["country",              b => b.country || ""],
+  ["country_manager",      b => b.countryManager || ""],
+  ["scope",                b => b.scope || ""],
+  ["existing_account",     b => b.existingAccount || ""],
+  ["existing_retailer_id", b => b.existingRetailerId || ""],
+  ["new_account",          b => b.newAccount || ""],
+  ["outlet_count",         b => Number(b.outletCount) || 0],
+  ["ck_addon_count",       b => Number(b.ckAddonCount) || 0],
+  ["wh_addon_count",       b => Number(b.whAddonCount) || 0],
+  ["cost_center_count",    b => Number(b.costCenterCount) || 0],
+  ["feature_count",        b => Number(b.featureCount) || 0],
+  ["document_count",       b => Number(b.documentCount) || 0],
+  ["documents_stored",     b => Number(b.documentsStored) || 0],
+  ["bundle_url",           b => b.bundleUrl || ""],
+  ["hubspot_contact_id",   b => b.hubspotContactId || ""],
+  ["hubspot_deal_id",      b => b.hubspotDealId || ""],
+  ["hubspot_note_id",      b => b.hubspotNoteId || ""],
+  ["onboarding_deal_id",   b => b.onboardingDealId || ""],
+  ["delivery_results",     b => b.deliveryResults || ""],
+  ["notes",                b => b.notes || ""],
+];
+
+async function saveToD1(env, body, rows) {
+  if (!env.DB) return false;
+  try {
+    const names = D1_COLUMNS.map(c => c[0]).concat("payload");
+    const values = D1_COLUMNS.map(c => c[1](body)).concat(JSON.stringify(body));
+    // INSERT OR REPLACE, so replaying a held or queued submission updates the
+    // row rather than failing on the primary key or duplicating it.
+    const sql = `INSERT OR REPLACE INTO submissions (${names.join(", ")}) VALUES (${names.map(() => "?").join(", ")})`;
+    const statements = [env.DB.prepare(sql).bind(...values)];
+
+    statements.push(env.DB.prepare("DELETE FROM submission_items WHERE submission_id = ?").bind(body.submissionId));
+    (rows || []).forEach((r, i) => {
+      statements.push(env.DB.prepare(
+        "INSERT INTO submission_items (submission_id, line_no, item_id, name, kind, quantity, bills_under) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      ).bind(body.submissionId, i + 1, r.itemId || "", r.name || "", r.kind || "", Number(r.quantity) || 0, r.billsUnder || ""));
+    });
+
+    await env.DB.batch(statements);
+    return true;
+  } catch (err) {
+    // Never sink a submission over the record of it. HubSpot and Slack have
+    // already run by this point; losing the row is recoverable, losing the
+    // request is not.
+    console.error("D1 write failed", body && body.submissionId, String(err));
+    return false;
+  }
+}
+
+function csvCell(v) {
+  const s = v === null || v === undefined ? "" : String(v);
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+// The whole record as a spreadsheet, which is what the Sheets mirror was for.
+// ?limit= (default 1000, max 10000), ?since=ISO-date to narrow it.
+async function handleExportCsv(request, env) {
+  if (!env.DB) return json({ error: "No database bound" }, 503, request, env);
+  const q     = new URL(request.url).searchParams;
+  const limit = Math.min(Math.max(Number(q.get("limit")) || 1000, 1), 10000);
+  const since = str(q.get("since"));
+  try {
+    const names = D1_COLUMNS.map(c => c[0]);
+    const stmt = since
+      ? env.DB.prepare(`SELECT ${names.join(", ")} FROM submissions WHERE received_at >= ? ORDER BY received_at DESC LIMIT ?`).bind(since, limit)
+      : env.DB.prepare(`SELECT ${names.join(", ")} FROM submissions ORDER BY received_at DESC LIMIT ?`).bind(limit);
+    const { results } = await stmt.all();
+    const lines = [names.join(",")];
+    for (const row of results || []) lines.push(names.map(n => csvCell(row[n])).join(","));
+    const stamp = new Date().toISOString().slice(0, 10);
+    return new Response(lines.join("\r\n"), {
+      status: 200,
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="supy-expansion-${stamp}.csv"`,
+        ...corsHeaders(request, env),
+      },
+    });
+  } catch (err) {
+    console.error("CSV export failed", String(err));
+    return json({ error: "Export failed" }, 500, request, env);
+  }
+}
+
 async function postToSheets(env, body, attempts = 2) {
   if (!env.GOOGLE_SCRIPT_URL) return false;
   for (let i = 0; i < attempts; i++) {
     try {
       const res = await fetch(env.GOOGLE_SCRIPT_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(await googleAuthHeaders(env)) },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(SHEETS_TIMEOUT_MS),
       });
@@ -2646,6 +2843,10 @@ function handleDebug(request, env) {
     GMAIL_CLIENT_SECRET:   Boolean(env.GMAIL_CLIENT_SECRET),
     GMAIL_REFRESH_TOKEN:   Boolean(env.GMAIL_REFRESH_TOKEN),
     GOOGLE_SCRIPT_URL:     Boolean(env.GOOGLE_SCRIPT_URL),
+    GOOGLE_OAUTH_CLIENT_ID:     Boolean(env.GOOGLE_OAUTH_CLIENT_ID),
+    GOOGLE_OAUTH_CLIENT_SECRET: Boolean(env.GOOGLE_OAUTH_CLIENT_SECRET),
+    GOOGLE_OAUTH_REFRESH_TOKEN: Boolean(env.GOOGLE_OAUTH_REFRESH_TOKEN),
+    sheetsAuthenticated:        Boolean(env.GOOGLE_OAUTH_CLIENT_ID && env.GOOGLE_OAUTH_CLIENT_SECRET && env.GOOGLE_OAUTH_REFRESH_TOKEN),
     CLOUDINARY_CLOUD_NAME: Boolean(env.CLOUDINARY_CLOUD_NAME),
     CLOUDINARY_API_KEY:    Boolean(env.CLOUDINARY_API_KEY),
     CLOUDINARY_API_SECRET: Boolean(env.CLOUDINARY_API_SECRET),
@@ -2654,6 +2855,7 @@ function handleDebug(request, env) {
     COUNTRY_MANAGERS_JSON: Boolean(env.COUNTRY_MANAGERS_JSON),
     ALLOWED_ORIGINS:       env.ALLOWED_ORIGINS || "(any)",
     PUBLIC_BASE_URL:       env.PUBLIC_BASE_URL || "(request origin)",
+    DB_bound:              Boolean(env.DB),
     LOGS_bound:            Boolean(env.LOGS),
     RATELIMIT_bound:       Boolean(env.RATELIMIT),
     DRAFTS_bound:          Boolean(env.DRAFTS),

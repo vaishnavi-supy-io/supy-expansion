@@ -83,6 +83,23 @@ id      = "3f376f1e88b5469fb645c37a228ebcde"          # old personal-account id:
 binding = "RATELIMIT"
 id      = "f1d30ab8ca4649f78a4097dcc555c527"     # old personal-account id: f3c41ed69e184e68b1ae6716825b776f
 
+# ── D1: the durable record of every submission ────────────────
+# Cloudflare's own SQL store, on this account. Added because the Sheets mirror
+# depends on an Apps Script deployment that Workspace policy will not let us
+# share with an anonymous caller, so the Worker cannot reach it. D1 needs no
+# external account, no sharing and no admin change.
+#
+# Schema lives in worker/schema.sql. Apply it with:
+#   npx wrangler d1 execute supy-expansion-submissions --remote --file=schema.sql
+#
+# Read it back with GET /export.csv (admin token), or query directly:
+#   npx wrangler d1 execute supy-expansion-submissions --remote \
+#     --command "SELECT received_at, account, country FROM submissions ORDER BY received_at DESC LIMIT 20"
+[[d1_databases]]
+binding       = "DB"
+database_name = "supy-expansion-submissions"
+database_id   = "31f9de22-6983-4cf3-a036-8d2a21982d32"
+
 # ── Secrets — set via CLI, never written in this file ─────────
 # These do NOT carry over from the old account. Re-run worker/setup-secrets.sh
 # once the namespaces above exist:

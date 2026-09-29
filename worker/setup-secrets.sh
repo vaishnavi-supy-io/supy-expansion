@@ -93,6 +93,16 @@ echo "   The Apps Script web app URL — see google-apps-script/Code.gs"
 put GOOGLE_SCRIPT_URL "Apps Script web app URL"
 
 echo
+echo "── Apps Script identity ── only if the deployment is NOT shared with \"Anyone\""
+echo "   A deployment shared \"Anyone within Supy\" refuses anonymous callers, and a"
+echo "   Worker is anonymous — Google answers 200 with a sign-in page. These make the"
+echo "   Worker call it as you. Skip all three if the deployment is public."
+echo "     console.cloud.google.com -> APIs & Services -> Credentials -> OAuth client"
+put GOOGLE_OAUTH_CLIENT_ID     "Google OAuth client id (...apps.googleusercontent.com)"
+put GOOGLE_OAUTH_CLIENT_SECRET "Google OAuth client secret"
+put GOOGLE_OAUTH_REFRESH_TOKEN "Google OAuth refresh token (1//...)"
+
+echo
 echo "── Rate limit ── requests per IP per window. Skip to use the built-in default."
 put RATE_LIMIT "a number, e.g. 20"
 
