@@ -1246,6 +1246,22 @@ async function getHubspotToken(env) {
   return (await r.json()).access_token || null;
 }
 
+// HubSpot validates phone as E.164 - a leading + and digits, nothing else.
+// The form accepts "+971 50 412 8830" because that is how people write a
+// number, so it is normalised on the way out rather than restricted on the way
+// in. The old guard only checked for the leading +, which let every spaced
+// number through to a 400.
+//
+// An unqualified or implausible number is dropped rather than sent. Losing a
+// phone number costs one field; failing the create costs the contact, the note,
+// the deal and every association hanging off them.
+function hsPhone(raw) {
+  const v = str(raw);
+  if (!v.startsWith("+")) return undefined;
+  const e164 = "+" + v.slice(1).replace(/\D/g, "");
+  return /^\+\d{7,15}$/.test(e164) ? e164 : undefined;
+}
+
 async function upsertContact(token, p) {
   const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
   const email   = str(p.requester.email);
@@ -1255,8 +1271,8 @@ async function upsertContact(token, p) {
   const lastname  = parts.join(" ");
 
   const props = { email, firstname, lastname, company: str(p.requester.account) };
-  const phone = str(p.requester.phone);
-  if (phone.startsWith("+")) props.phone = phone;   // HubSpot rejects unqualified numbers
+  const phone = hsPhone(p.requester.phone);
+  if (phone) props.phone = phone;   // omitted rather than sent malformed
   if (str(p.requester.country)) props.country = str(p.requester.country);
 
   const search = () => fetch(`${HUBSPOT_API}/crm/v3/objects/contacts/search`, {
