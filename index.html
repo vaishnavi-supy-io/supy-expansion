@@ -357,10 +357,21 @@ input[readonly],input:disabled,textarea:disabled{background:var(--readonly);bord
 .restorebar button{background:none;border:none;color:#2f6b41;font:inherit;font-weight:700;
   text-decoration:underline;cursor:pointer;padding:0}
 </style>
-  <!-- Supy's own favicon, served from this origin rather than hotlinked from
-       the marketing site's CDN: a copy here cannot break when that CDN
-       reorganises, and it keeps the form from calling a third party. -->
+  <!-- Supy's own icon, served from this origin rather than hotlinked from the
+       marketing site's CDN: a copy here cannot break when that CDN reorganises,
+       and it keeps the form from calling a third party.
+
+       Four files, because one is not enough. The SVG wraps its artwork in a
+       <pattern> around an embedded bitmap, which several browsers decline to
+       render at favicon size; the PNG is what they actually draw. favicon.ico
+       exists because browsers request /favicon.ico whatever the page links, and
+       a 404 there is how you end up with a blank tab despite everything else
+       being right. Paths are relative so they resolve both at the root of
+       expansion.supy.io and under the /supy-expansion/ subpath on Pages. -->
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
 </head>
 <body>
 

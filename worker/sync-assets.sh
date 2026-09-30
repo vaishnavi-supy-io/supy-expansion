@@ -11,5 +11,7 @@ root="$(dirname "$here")"
 mkdir -p "$here/public"
 cp "$root/index.html"  "$here/public/index.html"
 cp "$root/sample.html" "$here/public/sample.html"
-cp "$root/favicon.svg" "$here/public/favicon.svg"
-echo "synced: index.html, sample.html, favicon.svg -> worker/public/"
+for f in favicon.svg favicon.ico favicon-32.png apple-touch-icon.png; do
+  cp "$root/$f" "$here/public/$f"
+done
+echo "synced: index.html, sample.html and 4 icon files -> worker/public/"
