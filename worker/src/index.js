@@ -2688,6 +2688,27 @@ async function saveToD1(env, body, rows) {
   }
 }
 
+// Columns rebuilt from the stored payload rather than kept as their own
+// D1 fields. They are lists, not scalars - the entities a request declared and
+// every document it carried - and flattening them into the table would either
+// cap how many a submission may have or scatter them across numbered columns.
+// The payload holds the whole record, so the export composes them on the way
+// out and nothing is lost either way.
+const D1_DERIVED = [
+  // An answer the client actually gave, and the one the billing section hangs
+  // off. It was missing from the table and from the export; the old sheet had
+  // it as a column from the start.
+  ["same_legal_entity", b => b.sameLegalEntity || ""],
+  ["billing_entities", b => (b.entities || [])
+      .map(e => `${e.name} (CRN ${e.registrationNumber || "-"}, TRN ${e.trn || "-"})`).join("\n")],
+  ["documents", b => (b.documents || [])
+      .map(d => `${d.category}: ${d.filename}${d.url ? " " + d.url : " (not stored)"}`).join("\n")],
+  ["bundle_filename",     b => b.bundleFilename || ""],
+  ["hubspot_contact_url", b => b.hubspotContactUrl || ""],
+  ["hubspot_deal_url",    b => b.hubspotDealUrl || ""],
+  ["hubspot_company_ids", b => b.hubspotCompanyIds || ""],
+];
+
 function csvCell(v) {
   const s = v === null || v === undefined ? "" : String(v);
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -2730,13 +2751,21 @@ async function handleExportCsv(request, env) {
   }
 
   try {
-    const names = D1_COLUMNS.map(c => c[0]);
+    const names   = D1_COLUMNS.map(c => c[0]);
+    const derived = D1_DERIVED.map(c => c[0]);
+    const select  = names.concat("payload").join(", ");
     const stmt = since
-      ? env.DB.prepare(`SELECT ${names.join(", ")} FROM submissions WHERE received_at >= ? ORDER BY received_at DESC LIMIT ?`).bind(since, limit)
-      : env.DB.prepare(`SELECT ${names.join(", ")} FROM submissions ORDER BY received_at DESC LIMIT ?`).bind(limit);
+      ? env.DB.prepare(`SELECT ${select} FROM submissions WHERE received_at >= ? ORDER BY received_at DESC LIMIT ?`).bind(since, limit)
+      : env.DB.prepare(`SELECT ${select} FROM submissions ORDER BY received_at DESC LIMIT ?`).bind(limit);
     const { results } = await stmt.all();
-    const lines = [names.join(",")];
-    for (const row of results || []) lines.push(names.map(n => csvCell(row[n])).join(","));
+    const lines = [names.concat(derived).join(",")];
+    for (const row of results || []) {
+      let body = {};
+      try { body = JSON.parse(row.payload || "{}"); } catch { /* a row with an unreadable payload still exports its columns */ }
+      lines.push(names.map(n => csvCell(row[n]))
+        .concat(D1_DERIVED.map(c => csvCell(c[1](body))))
+        .join(","));
+    }
     const stamp = new Date().toISOString().slice(0, 10);
     return new Response(lines.join("\r\n"), {
       status: 200,
