@@ -965,7 +965,15 @@ function syncKsaBlocks(){
 /* ---------- retailer access (Existing Account) ---------- */
 function apiBase(){
   const url = CONFIG.apiOverride || CONFIG.webhookUrl || '';
-  return url ? url.replace(/\/webhook\/?$/, '') : '';
+  if (!url) return '';
+  // A relative webhook means the Worker serves this page and the API both, and
+  // is the normal case on expansion.supy.io. Stripping "/webhook" from it left
+  // an empty string, which every caller tests with `if (!base)` and reads as
+  // "no backend configured" - so the retailer picker, the country lookup, Save
+  // for later and, worst, resume links all degraded to preview mode on the one
+  // origin where they should work best. Name the origin outright instead.
+  if (url.charAt(0) === '/') return location.origin;
+  return url.replace(/\/webhook\/?$/, '');
 }
 function renderRetailerOptions(){
   const sel = $('existacct');
