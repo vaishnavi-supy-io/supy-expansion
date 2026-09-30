@@ -22,7 +22,7 @@ behaviour until delivery credentials exist.
 | KV namespaces | ✅ bound: DRAFTS, LOGS, RATELIMIT |
 | Custom domain, DNS, certificate | ✅ |
 | Drafts copied | ✅ re-synced — **run once more at cutover** |
-| `ADMIN_TOKEN` | ✅ generated, set, saved to `worker/.admin-token` (gitignored, 0600) |
+| `ADMIN_TOKEN` | ✅ generated and set. Held only by Cloudflare and the Apps Script property — no copy on any machine |
 | `RATE_LIMIT` | ✅ 500 |
 | Delivery credentials | ❌ **the only thing left** |
 
@@ -118,8 +118,12 @@ Check progress at any point:
 
 ```bash
 curl -s https://expansion.supy.io/health | python3 -m json.tool
-curl -s -H "x-admin-token: $(cat worker/.admin-token)" \
-  https://expansion.supy.io/debug | python3 -m json.tool
+# /debug, /logs, /pending and /export.csv need ADMIN_TOKEN. Cloudflare will not
+# hand it back, and it is deliberately not stored locally, so paste it at the
+# prompt rather than keeping a copy:
+read -rs -p "admin token: " T; echo
+curl -s -H "x-admin-token: $T" https://expansion.supy.io/debug | python3 -m json.tool
+unset T
 ```
 
 `sheets` should stop saying `"unset"`, and `acceptingSubmissions` should flip to

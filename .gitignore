@@ -9,11 +9,11 @@ node_modules/
 .DS_Store
 *.log
 
-# One-time handoff file for the Apps Script URL. Never committed.
+# Credential files. None of these should exist: secrets live in Cloudflare's
+# secret store and nowhere on a developer machine. Listed so that one created by
+# accident, or by an older version of the setup scripts, cannot be committed.
 worker/.sheeturl
-# Generated ADMIN_TOKEN, kept out of git.
 worker/.admin-token
-# One-time handoff file for the Slack bot token. Never committed.
 worker/.slacktoken
 
 # Static assets copied in at deploy time by worker/sync-assets.sh.

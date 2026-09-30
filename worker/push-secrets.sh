@@ -73,7 +73,7 @@ echo "Where that leaves the Worker:"
 curl -s --max-time 20 https://expansion.supy.io/health | python3 -m json.tool 2>/dev/null || echo "  (could not reach /health)"
 echo
 echo "Full picture:"
-echo "  curl -s -H \"x-admin-token: \$(cat .admin-token)\" https://expansion.supy.io/debug | python3 -m json.tool"
+echo "  read -rs -p \"admin token: \" T; echo; curl -s -H \"x-admin-token: \$T\" https://expansion.supy.io/debug | python3 -m json.tool; unset T"
 echo
 echo "Once every value is in and a test submission has gone through:"
 echo "  ./push-secrets.sh --shred"
