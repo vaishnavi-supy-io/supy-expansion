@@ -108,7 +108,10 @@ const HS = {
 };
 
 // Country → Slack mention. Override via env COUNTRY_MANAGERS_JSON = JSON string
-// e.g. {"United Arab Emirates":{"countryManager":"Jane Doe","slack":"<@U123>","accountManager":"John"},"Saudi Arabia":{...}}
+// e.g. {"United Arab Emirates":{"countryManager":"Jane Doe","slack":"<@U123>",
+//        "accountManager":"John Roe","accountManagerSlack":"<@U456>"}, "Saudi Arabia":{...}}
+// slack and accountManagerSlack are Slack member ids; without them the names
+// appear as plain text rather than as mentions.
 // If not set, a minimal demo map is used so the feature is visible in logs.
 const DEFAULT_COUNTRY_MANAGERS = {
   "United Arab Emirates": { countryManager: "UAE Country Manager", slack: "", accountManager: "" },
@@ -1741,13 +1744,26 @@ async function sendSlack(env, p, documents, contactId, submissionId, ctx = {}) {
   }
 
   // Two columns of label/value. Slack renders these side by side.
+  // Country decides both names. The account manager was in the map from the
+  // start and never reached the message, so a request routed to a real CSM
+  // still read as though only the country manager owned it. Either may be
+  // absent; the field degrades to whichever is known.
+  const ownerBits = [];
+  if (mgr && mgr.countryManager) {
+    ownerBits.push(smk(mgr.countryManager) + (mgr.slack ? ` ${mgr.slack}` : ""));
+  }
+  if (mgr && mgr.accountManager) {
+    ownerBits.push(`_AM_  ${smk(mgr.accountManager)}` + (mgr.accountManagerSlack ? ` ${mgr.accountManagerSlack}` : ""));
+  }
+  const ownerValue = ownerBits.length ? ownerBits.join("\n") : "_unassigned_";
+
   const dealValue = ctx.salesDealId
     ? `<${hsDealLink(ctx.salesDealId)}|${ctx.salesDealId}>`
       + (ctx.onboardingDeal ? `  ·  from <${hsDealLink(ctx.onboardingDeal.id)}|onboarding>` : "  ·  _no onboarding match_")
     : "_not created_";
   blocks.push({ type: "section", fields: [
     { type: "mrkdwn", text: `*From*\n${smk(p.requester.name)}  ·  ${smk(p.requester.email)}` },
-    { type: "mrkdwn", text: `*Owner*\n${mgr && mgr.countryManager ? smk(mgr.countryManager) + (mgr.slack ? ` ${mgr.slack}` : "") : "_unassigned_"}` },
+    { type: "mrkdwn", text: `*Owner*\n${ownerValue}` },
     { type: "mrkdwn", text: `*Deal*\n${dealValue}` },
     { type: "mrkdwn", text: `*Documents*\n${docsValue}` },
   ] });
