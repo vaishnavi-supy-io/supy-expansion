@@ -13,8 +13,16 @@
  * as you and makes OUTBOUND requests, so it needs no deployment, no sharing and
  * no admin change. Same rows, opposite direction.
  *
+ * WHERE IT WRITES
+ *
+ * LOG_SPREADSHEET_ID below, falling back to the bound spreadsheet. It refuses
+ * to write to the retailer directory, the same guard Code.gs carries: that
+ * sheet is read-only source data, and appending Requests/Items into it would
+ * corrupt the thing every lookup depends on.
+ *
  * SETUP (once)
- *   1. Extensions -> Apps Script, paste this file in.
+ *   1. Extensions -> Apps Script, add this as a NEW file alongside Code.gs.
+ *      Do not replace Code.gs; the two are unrelated and both are wanted.
  *   2. Project Settings -> Script Properties -> add:
  *        ADMIN_TOKEN   the contents of worker/.admin-token
  *      (A property, not a constant: the token must not live in source.)
@@ -28,6 +36,10 @@
  */
 
 var BASE = 'https://expansion.supy.io/export.csv';
+
+// Where the rows land. Same ids Code.gs uses.
+var LOG_SPREADSHEET_ID  = '1f0pRoEUI9XFWscSQ9uo5tboFGmMy68PBGi5ZFFBQuHQ';
+var DATA_SPREADSHEET_ID = '1raBGqWqxVaUcraY0gjR-CFQT3T2_TheemPfOpihmmFE';  // never write here
 var TABS = {
   requests: { name: 'Requests', url: BASE,                  key: ['submission_id'] },
   items:    { name: 'Items',    url: BASE + '?table=items', key: ['submission_id', 'line_no'] }
@@ -99,8 +111,23 @@ function sync_(tab, sinceIso) {
   Logger.log(tab.name + ': ' + appends + ' added, ' + updates + ' updated.');
 }
 
+/** The log spreadsheet, never the retailer directory. */
+function logSpreadsheet_() {
+  var ss = null;
+  if (LOG_SPREADSHEET_ID) {
+    try { ss = SpreadsheetApp.openById(LOG_SPREADSHEET_ID); }
+    catch (err) { throw new Error('Cannot open LOG_SPREADSHEET_ID ' + LOG_SPREADSHEET_ID + ': ' + err); }
+  }
+  if (!ss) ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error('No spreadsheet to write to. Set LOG_SPREADSHEET_ID.');
+  if (ss.getId() === DATA_SPREADSHEET_ID) {
+    throw new Error('Refusing to write to the retailer directory. Point LOG_SPREADSHEET_ID at a spreadsheet of our own.');
+  }
+  return ss;
+}
+
 function sheetFor_(name, header) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = logSpreadsheet_();
   var sheet = ss.getSheetByName(name);
   if (!sheet) {
     sheet = ss.insertSheet(name);
