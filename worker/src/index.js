@@ -2862,6 +2862,30 @@ function handleDebug(request, env) {
   }
   return json({
     HUBSPOT_ACCESS_TOKEN:  Boolean(env.HUBSPOT_ACCESS_TOKEN || env.HUBSPOT_PAT || env.PAT),
+    // The SHAPE of the stored token, never the token. A boolean said "set" for
+    // a value that could not authenticate, which sent the search everywhere
+    // except the value itself. Length, the four characters "pat-" and a
+    // whitespace flag identify a bad paste without disclosing the credential;
+    // this route already requires the admin token.
+    hubspotTokenShape: (() => {
+      const which = env.HUBSPOT_ACCESS_TOKEN ? "HUBSPOT_ACCESS_TOKEN"
+                  : env.HUBSPOT_PAT          ? "HUBSPOT_PAT"
+                  : env.PAT                  ? "PAT"
+                  : env.HS_ACCESS_TOKEN      ? "HS_ACCESS_TOKEN" : null;
+      if (!which) return "unset";
+      const raw = String(env[which]);
+      const t   = raw.trim();
+      return {
+        setAs:          which,
+        rawLength:      raw.length,
+        trimmedLength:  t.length,
+        hadWhitespace:  raw.length !== t.length,
+        prefix:         t.slice(0, 4),
+        startsWithPat:  /^pat-/.test(t),
+        prefixCaseOnly: /^pat-/i.test(t) && !/^pat-/.test(t),
+        wouldBeSent:    /^pat-/i.test(t),
+      };
+    })(),
     CLIENT_ID:             Boolean(env.CLIENT_ID),
     CLIENT_SECRET:         Boolean(env.CLIENT_SECRET),
     REFRESH_TOKEN:         Boolean(env.REFRESH_TOKEN),
