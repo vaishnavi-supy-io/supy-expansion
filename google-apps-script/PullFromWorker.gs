@@ -37,12 +37,22 @@
 
 var BASE = 'https://expansion.supy.io/export.csv';
 
-// Where the rows land. Same ids Code.gs uses.
+// Where the rows land.
+//   1f0pRo... is where the push receiver has written since 26 Aug 2026 - the
+//   one Code.gs names, 31 columns, last written 14 Sep.
+//   1cS08k... is the older sheet the receiver wrote to before that, back when
+//   LOG_SPREADSHEET_ID was null and it used the bound spreadsheet. 21 columns,
+//   stops 26 Aug. Set it here instead if that is the sheet people actually open.
 var LOG_SPREADSHEET_ID  = '1f0pRoEUI9XFWscSQ9uo5tboFGmMy68PBGi5ZFFBQuHQ';
 var DATA_SPREADSHEET_ID = '1raBGqWqxVaUcraY0gjR-CFQT3T2_TheemPfOpihmmFE';  // never write here
+// Deliberately NOT "Requests"/"Items". Those tabs already exist and were
+// written by the push receiver, whose columns are different and differently
+// named. Appending this export's rows under those headers would misalign every
+// column of the existing history. These are new tabs; the old ones are left
+// exactly as they are.
 var TABS = {
-  requests: { name: 'Requests', url: BASE,                  key: ['submission_id'] },
-  items:    { name: 'Items',    url: BASE + '?table=items', key: ['submission_id', 'line_no'] }
+  requests: { name: 'Requests (synced)', url: BASE,                  key: ['submission_id'] },
+  items:    { name: 'Items (synced)',    url: BASE + '?table=items', key: ['submission_id', 'line_no'] }
 };
 
 function backfill()      { TABS_forEach_(function (t) { sync_(t, null); }); }
@@ -76,9 +86,19 @@ function sync_(tab, sinceIso) {
 
   var header = rows[0];
   var sheet  = sheetFor_(tab.name, header);
-  // Rewrite the header if the export gained a column, so old sheets keep up.
-  if (sheet.getLastColumn() !== header.length) {
-    sheet.getRange(1, 1, 1, header.length).setValues([header]);
+
+  // Never write under a header that is not this export's. A tab that already
+  // holds differently-shaped rows belongs to something else, and appending to
+  // it would misalign every column rather than fail visibly.
+  var existingHeader = sheet.getLastRow() > 0
+    ? sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0]
+    : [];
+  var sameHeader = existingHeader.length === header.length && existingHeader.every(function (h, i) {
+    return String(h) === String(header[i]);
+  });
+  if (existingHeader.length && !sameHeader) {
+    throw new Error('Sheet "' + tab.name + '" has a different header than the export. '
+      + 'Refusing to write into it. Rename that tab, or point TABS at a new name.');
   }
 
   var keyCols = tab.key.map(function (k) { return header.indexOf(k); });
