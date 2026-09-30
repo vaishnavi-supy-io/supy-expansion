@@ -1779,9 +1779,13 @@ async function sendSlack(env, p, documents, contactId, submissionId, ctx = {}) {
     blocks.push({ type: "section", text: { type: "mrkdwn", text: flagText } });
   }
 
+  // The primary button names the thing it opens, not the pipeline it lives in.
+  // "Open Sales 360" only ever appeared when neither a deal nor a contact was
+  // created - the one case where the reader most needs to know what they are
+  // about to look at, and the label told them the least.
   const buttons = [{
     type: "button", style: "primary",
-    text: { type: "plain_text", text: ctx.salesDealId ? "Open deal" : (contactId ? "Open contact" : "Open Sales 360"), emoji: true },
+    text: { type: "plain_text", text: ctx.salesDealId ? "Open deal" : (contactId ? "Open contact" : "Open deal"), emoji: true },
     url: ctx.salesDealId ? hsDealLink(ctx.salesDealId) : (contactId ? hsContactLink(contactId) : hsPipeline),
   }];
   if (ctx.salesDealId && contactId) {
