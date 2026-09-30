@@ -84,24 +84,32 @@ function pushAccessSheet() {
   if (data.length < 2) { Logger.log('Access sheet is empty.'); return; }
 
   var headers = data[0].map(function (h) { return String(h).trim().toLowerCase(); });
-  var emailIdx = headers.indexOf('email');
-  var nameIdx  = headers.indexOf('retailer name');
-  if (nameIdx === -1) nameIdx = headers.indexOf('retailer');
-  if (nameIdx === -1) nameIdx = headers.indexOf('account');
-  var idIdx = headers.indexOf('retailer id');
-  if (idIdx === -1) idIdx = headers.indexOf('retailer_id');
+
+  // The directory calls it "User Email", and looking for exactly "email" is why
+  // this lookup returned an empty list for every address ever tried. Several
+  // spellings are accepted rather than one.
+  var emailIdx = firstIndex_(headers, ['user email', 'email', 'useremail', 'e-mail']);
+  var nameIdx  = firstIndex_(headers, ['retailer name', 'retailer', 'account', 'retailername']);
+  var idIdx    = firstIndex_(headers, ['retailer id', 'retailer_id', 'retailerid']);
   if (emailIdx === -1 || nameIdx === -1 || idIdx === -1) {
-    throw new Error('Access sheet needs Email, Retailer Name and Retailer ID columns. Found: ' + headers.join(', '));
+    throw new Error('Could not find the email / retailer name / retailer id columns. Found: ' + headers.join(', '));
   }
 
-  var rows = [];
+  // One row per outlet and location, so the same person and retailer repeat
+  // many times over. The Worker keys on (email, retailer_id) anyway; collapsing
+  // here keeps the upload to a fraction of the sheet.
+  var seen = {}, rows = [];
   for (var i = 1; i < data.length; i++) {
     var email = String(data[i][emailIdx] || '').trim();
     var name  = String(data[i][nameIdx]  || '').trim();
     var rid   = String(data[i][idIdx]    || '').trim();
     if (!email || !name || !rid) continue;   // a row without an id routes nowhere
+    var k = email.toLowerCase() + '\u0000' + rid;
+    if (seen[k]) continue;
+    seen[k] = true;
     rows.push({ email: email, name: name, retailerId: rid });
   }
+  Logger.log('Access sheet: ' + (data.length - 1) + ' rows -> ' + rows.length + ' unique (email, retailer).');
   if (!rows.length) { Logger.log('No usable rows (need email, name and retailer id).'); return; }
 
   // Chunked so a large sheet does not hit the request size limit. Only the
@@ -231,6 +239,15 @@ function sheetFor_(name, header) {
     sheet.getRange(1, 1, 1, header.length).setFontWeight('bold');
   }
   return sheet;
+}
+
+/** First of several acceptable header spellings, or -1. */
+function firstIndex_(headers, candidates) {
+  for (var i = 0; i < candidates.length; i++) {
+    var at = headers.indexOf(candidates[i]);
+    if (at !== -1) return at;
+  }
+  return -1;
 }
 
 function daysAgoIso_(n) {
