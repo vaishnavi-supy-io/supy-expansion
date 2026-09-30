@@ -2694,12 +2694,41 @@ function csvCell(v) {
 }
 
 // The whole record as a spreadsheet, which is what the Sheets mirror was for.
-// ?limit= (default 1000, max 10000), ?since=ISO-date to narrow it.
+// ?limit= (default 1000, max 10000), ?since=ISO-date to narrow it,
+// ?table=items for one row per allocated line — the Items tab the sheet had.
 async function handleExportCsv(request, env) {
   if (!env.DB) return json({ error: "No database bound" }, 503, request, env);
   const q     = new URL(request.url).searchParams;
   const limit = Math.min(Math.max(Number(q.get("limit")) || 1000, 1), 10000);
   const since = str(q.get("since"));
+
+  // Items carry the parent's received_at so the tab can be filtered and sorted
+  // on its own, and so ?since= means the same thing on both tables.
+  if (str(q.get("table")) === "items") {
+    try {
+      const cols = ["submission_id", "received_at", "account", "line_no", "item_id", "name", "kind", "quantity", "bills_under"];
+      const sql  = `SELECT i.submission_id, s.received_at, s.account, i.line_no, i.item_id, i.name, i.kind, i.quantity, i.bills_under
+                    FROM submission_items i JOIN submissions s ON s.submission_id = i.submission_id
+                    ${since ? "WHERE s.received_at >= ?" : ""}
+                    ORDER BY s.received_at DESC, i.line_no ASC LIMIT ?`;
+      const stmt = since ? env.DB.prepare(sql).bind(since, limit) : env.DB.prepare(sql).bind(limit);
+      const { results } = await stmt.all();
+      const lines = [cols.join(",")];
+      for (const row of results || []) lines.push(cols.map(n => csvCell(row[n])).join(","));
+      return new Response(lines.join("\r\n"), {
+        status: 200,
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="supy-expansion-items-${new Date().toISOString().slice(0, 10)}.csv"`,
+          ...corsHeaders(request, env),
+        },
+      });
+    } catch (err) {
+      console.error("items export failed", String(err));
+      return json({ error: "Export failed" }, 500, request, env);
+    }
+  }
+
   try {
     const names = D1_COLUMNS.map(c => c[0]);
     const stmt = since
