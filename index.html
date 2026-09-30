@@ -377,7 +377,7 @@ input[readonly],input:disabled,textarea:disabled{background:var(--readonly);bord
   <div id="formView">
     <div class="crumbs">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-      Support <span>/</span> Requests <span>/</span> <b>Expansion</b>
+      <b>Expansion</b>
     </div>
     <h1>Expansion request<span id="h1dyn"></span></h1>
 
@@ -625,7 +625,7 @@ input[readonly],input:disabled,textarea:disabled{background:var(--readonly);bord
         </div>
         <div class="side-foot">
           <button class="btn pri" type="button" id="submitBtn">Submit request</button>
-          <button class="btn sec" type="button" id="saveBtn" style="width:100%;margin-top:8px">Save and get a resume link</button>
+          <button class="btn sec" type="button" id="saveBtn" style="width:100%;margin-top:8px">Save for later</button>
           <div class="hint" id="saveMsg" hidden style="margin-top:9px;word-break:break-all"></div>
           <div class="dest">Check your list above before submitting. You can add or remove items at any point. Your progress is saved in this browser as you type.</div>
         </div>
@@ -1934,7 +1934,7 @@ async function saveDraftToServer(){
     msg.hidden = false;
     msg.textContent = 'Could not save right now — your progress is still kept in this browser. Try again in a moment.';
   } finally {
-    btn.disabled = false; btn.textContent = 'Save and get a resume link';
+    btn.disabled = false; btn.textContent = 'Save for later';
   }
 }
 
