@@ -44,6 +44,7 @@ var BASE = 'https://expansion.supy.io/export.csv';
 //   LOG_SPREADSHEET_ID was null and it used the bound spreadsheet. 21 columns,
 //   stops 26 Aug. Set it here instead if that is the sheet people actually open.
 var LOG_SPREADSHEET_ID  = '1f0pRoEUI9XFWscSQ9uo5tboFGmMy68PBGi5ZFFBQuHQ';
+var DATA_SHEET_GID      = 599203487;   // the access tab, as Code.gs reads it
 var DATA_SPREADSHEET_ID = '1raBGqWqxVaUcraY0gjR-CFQT3T2_TheemPfOpihmmFE';  // never write here
 // Deliberately NOT "Requests"/"Items". Those tabs already exist and were
 // written by the push receiver, whose columns are different and differently
@@ -55,6 +56,74 @@ var TABS = {
   items:    { name: 'Items (synced)',    url: BASE + '?table=items', key: ['submission_id', 'line_no'] }
 };
 
+/**
+ * Pushes the access sheet up to the Worker, which cannot read it itself.
+ *
+ * The retailer picker used to have the Worker fetch the web app on every
+ * lookup. That fails twice over here: the deployment cannot be shared with an
+ * anonymous caller, and a cold Apps Script takes longer than the 10s the form
+ * waits. Sending the list ahead of time removes the request-time dependency
+ * entirely - lookups are then answered from the Worker's own copy.
+ *
+ * Reads the same sheet and columns Code.gs reads, so the two cannot disagree
+ * about who may act for whom.
+ */
+function pushAccessSheet() {
+  var token = PropertiesService.getScriptProperties().getProperty('ADMIN_TOKEN');
+  if (!token) throw new Error('Set ADMIN_TOKEN in Project Settings -> Script Properties first.');
+
+  var ss = SpreadsheetApp.openById(DATA_SPREADSHEET_ID);
+  var sh = null;
+  if (DATA_SHEET_GID) {
+    sh = ss.getSheets().filter(function (x) { return x.getSheetId() === DATA_SHEET_GID; })[0] || null;
+  }
+  if (!sh) sh = ss.getSheetByName('Access') || ss.getSheets()[0];
+  if (!sh) throw new Error('Could not find the access sheet.');
+
+  var data = sh.getDataRange().getValues();
+  if (data.length < 2) { Logger.log('Access sheet is empty.'); return; }
+
+  var headers = data[0].map(function (h) { return String(h).trim().toLowerCase(); });
+  var emailIdx = headers.indexOf('email');
+  var nameIdx  = headers.indexOf('retailer name');
+  if (nameIdx === -1) nameIdx = headers.indexOf('retailer');
+  if (nameIdx === -1) nameIdx = headers.indexOf('account');
+  var idIdx = headers.indexOf('retailer id');
+  if (idIdx === -1) idIdx = headers.indexOf('retailer_id');
+  if (emailIdx === -1 || nameIdx === -1 || idIdx === -1) {
+    throw new Error('Access sheet needs Email, Retailer Name and Retailer ID columns. Found: ' + headers.join(', '));
+  }
+
+  var rows = [];
+  for (var i = 1; i < data.length; i++) {
+    var email = String(data[i][emailIdx] || '').trim();
+    var name  = String(data[i][nameIdx]  || '').trim();
+    var rid   = String(data[i][idIdx]    || '').trim();
+    if (!email || !name || !rid) continue;   // a row without an id routes nowhere
+    rows.push({ email: email, name: name, retailerId: rid });
+  }
+  if (!rows.length) { Logger.log('No usable rows (need email, name and retailer id).'); return; }
+
+  // Chunked so a large sheet does not hit the request size limit. Only the
+  // first chunk replaces; the rest append to the set it started.
+  var CHUNK = 500, sent = 0, last = null;
+  for (var c = 0; c < rows.length; c += CHUNK) {
+    var res = UrlFetchApp.fetch('https://expansion.supy.io/retailers/sync', {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { 'x-admin-token': token },
+      payload: JSON.stringify({ rows: rows.slice(c, c + CHUNK), replace: c === 0 }),
+      muteHttpExceptions: true
+    });
+    if (res.getResponseCode() !== 200) {
+      throw new Error('Worker returned ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 200));
+    }
+    last = res.getContentText();
+    sent += Math.min(CHUNK, rows.length - c);
+  }
+  Logger.log('Access sheet pushed: ' + sent + ' rows. Worker says: ' + last);
+}
+
 function backfill()      { TABS_forEach_(function (t) { sync_(t, null); }); }
 function syncRecent()    { TABS_forEach_(function (t) { sync_(t, daysAgoIso_(7)); }); }
 function TABS_forEach_(fn) { fn(TABS.requests); fn(TABS.items); }
@@ -64,8 +133,14 @@ function installTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (t.getHandlerFunction() === 'syncRecent') ScriptApp.deleteTrigger(t);
   });
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'pushAccessSheet') ScriptApp.deleteTrigger(t);
+  });
   ScriptApp.newTrigger('syncRecent').timeBased().everyMinutes(15).create();
-  Logger.log('Trigger installed: syncRecent every 15 minutes.');
+  // The access sheet refreshes daily, so hourly is far more often than it
+  // changes and still recovers quickly from a failed run.
+  ScriptApp.newTrigger('pushAccessSheet').timeBased().everyHours(1).create();
+  Logger.log('Triggers installed: syncRecent every 15 minutes, pushAccessSheet hourly.');
 }
 
 function sync_(tab, sinceIso) {

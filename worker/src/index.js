@@ -233,6 +233,15 @@ export default {
       if (url.pathname === "/download" && request.method === "GET") {
         return await handleDownload(request, env);
       }
+      // Apps Script pushes the access sheet here, because the Worker is not
+      // allowed to read it. Same admin guard as the other admin routes: these
+      // rows map people to the accounts they can act for.
+      if (url.pathname === "/retailers/sync" && request.method === "POST") {
+        if (!env.ADMIN_TOKEN || request.headers.get("x-admin-token") !== env.ADMIN_TOKEN) {
+          return json({ error: "Unauthorized" }, 401, request, env);
+        }
+        return await handleAccessSync(request, env);
+      }
       if (url.pathname === "/retailers" && request.method === "GET") {
         return await handleRetailers(request, env, ctx);
       }
@@ -284,10 +293,14 @@ export default {
           catch { sheets = `invalid (${env.GOOGLE_SCRIPT_URL.length} chars, not a URL)`; }
         }
         // How many rows the durable record holds. Null when D1 is not bound.
-        let recorded = null;
+        let recorded = null, access = null;
         if (env.DB) {
           try { recorded = (await env.DB.prepare("SELECT COUNT(*) AS n FROM submissions").first()).n; }
           catch (e) { recorded = `error: ${String(e).slice(0, 60)}`; }
+          try {
+            const a = await env.DB.prepare("SELECT COUNT(*) AS n, MAX(synced_at) AS at FROM retailer_access").first();
+            access = { rows: a.n, lastSync: a.at || null };
+          } catch (e) { access = `error: ${String(e).slice(0, 60)}`; }
         }
         let queued = null;
         if (env.LOGS) {
@@ -298,6 +311,9 @@ export default {
           // The durable record on Cloudflare, independent of the Sheets mirror.
           recordStore: env.DB ? "d1" : "none",
           recordedSubmissions: recorded,
+          // The local copy of the access sheet. rows:0 means lookups still fall
+          // through to the Apps Script fetch, which this Workspace blocks.
+          retailerAccess: access,
           // Whether the Apps Script calls carry a supy.io identity. A
           // domain-restricted deployment needs this; a public one ignores it.
           sheetsAuthenticated: Boolean(env.GOOGLE_OAUTH_CLIENT_ID && env.GOOGLE_OAUTH_CLIENT_SECRET && env.GOOGLE_OAUTH_REFRESH_TOKEN),
@@ -2147,6 +2163,78 @@ async function googleAuthHeaders(env) {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
+// ─────────────────────────────────────────────────────────────
+// Retailer access, served locally
+//
+// The lookup used to fetch the Apps Script web app on every request. That
+// deployment cannot be shared with an anonymous caller on this Workspace, so
+// the Worker receives a sign-in page; and before that it was the cold start
+// that broke it, taking longer than the 10s the form waits. Both are the same
+// shape of problem: a request-time dependency on something slow we are not
+// allowed to call.
+//
+// Apps Script now pushes the list here on a timer - outbound, as the user, no
+// sharing involved - and lookups are answered from D1 in milliseconds. The live
+// fetch stays as a fallback for as long as anything still has a working URL.
+// ─────────────────────────────────────────────────────────────
+
+async function handleAccessSync(request, env) {
+  if (!env.DB) return json({ error: "No database bound" }, 503, request, env);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: "Body must be JSON" }, 400, request, env); }
+
+  const rows = Array.isArray(body && body.rows) ? body.rows : null;
+  if (!rows) return json({ error: "Expected { rows: [...] }" }, 400, request, env);
+
+  // Only rows carrying a retailer id can route anything - the same rule Code.gs
+  // applies - so the rest are counted and dropped rather than offered as a
+  // choice that resolves to nothing.
+  let skipped = 0;
+  const clean = [];
+  for (const r of rows) {
+    const email = str(r && r.email).toLowerCase();
+    const name  = str(r && (r.name || r.retailerName));
+    const rid   = str(r && (r.retailerId || r.retailer_id));
+    if (!email || !name || !rid) { skipped++; continue; }
+    clean.push([email, name, rid]);
+  }
+
+  try {
+    // replace:true starts a new set. A large sheet arrives over several calls,
+    // so only the first clears - otherwise each chunk would wipe the last.
+    if (body.replace) await env.DB.prepare("DELETE FROM retailer_access").run();
+
+    const stmt = env.DB.prepare(
+      "INSERT OR REPLACE INTO retailer_access (email, retailer_name, retailer_id, synced_at) VALUES (?, ?, ?, datetime('now'))");
+    for (let i = 0; i < clean.length; i += 100) {
+      await env.DB.batch(clean.slice(i, i + 100).map(r => stmt.bind(r[0], r[1], r[2])));
+    }
+    const total = (await env.DB.prepare("SELECT COUNT(*) AS n FROM retailer_access").first()).n;
+    return json({ status: "ok", received: rows.length, stored: clean.length, skipped, total }, 200, request, env);
+  } catch (err) {
+    console.error("access sync failed", String(err));
+    return json({ error: "Sync failed" }, 500, request, env);
+  }
+}
+
+/** The local copy. Null when it has never been populated, so callers can fall back. */
+async function readAccessLocal(env, email) {
+  if (!env.DB) return null;
+  try {
+    const { results } = await env.DB
+      .prepare("SELECT retailer_name AS name, retailer_id AS retailerId FROM retailer_access WHERE email = ? ORDER BY retailer_name")
+      .bind(str(email).toLowerCase()).all();
+    if (results && results.length) return results.map(r => ({ name: str(r.name), retailerId: str(r.retailerId) }));
+    // An empty result for a known-populated table is a real "no access", not a
+    // missing copy. Only an empty TABLE means fall back.
+    const total = (await env.DB.prepare("SELECT COUNT(*) AS n FROM retailer_access").first()).n;
+    return total > 0 ? [] : null;
+  } catch (err) {
+    console.error("local access lookup failed", String(err));
+    return null;
+  }
+}
+
 async function readAccessSheet(env, sheetUrl, email, timeoutMs) {
   const sep = sheetUrl.includes("?") ? "&" : "?";
   try {
@@ -2189,6 +2277,16 @@ async function handleRetailers(request, env, ctx) {
         return json({ ...j, cached: true, ms: Date.now() - started }, 200, request, env);
       }
     } catch { /* cache is an optimisation, never a dependency */ }
+  }
+
+  // The local copy first: no Google call, no cold start, no domain restriction.
+  const local = await readAccessLocal(env, email);
+  if (local) {
+    const body = { retailers: local, source: local.length ? "local" : "local-no-match" };
+    if (env.DRAFTS) {
+      try { await env.DRAFTS.put(cacheKey, JSON.stringify(body), { expirationTtl: local.length ? 600 : 60 }); } catch {}
+    }
+    return json({ ...body, ms: Date.now() - started }, 200, request, env);
   }
 
   let retailers = [];

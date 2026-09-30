@@ -61,3 +61,21 @@ CREATE TABLE IF NOT EXISTS submission_items (
 );
 
 CREATE INDEX IF NOT EXISTS idx_items_submission ON submission_items (submission_id);
+
+-- Which retailers an email may act for. A local copy of the access sheet,
+-- pushed in by Apps Script rather than read live.
+--
+-- The lookup used to fetch the Apps Script web app on every keystroke-ish
+-- request. That deployment cannot be shared with an anonymous caller on this
+-- Workspace, so the Worker got a sign-in page; and even when it worked, a cold
+-- Apps Script took longer than the 10s budget the form allows. Serving from
+-- here answers in milliseconds and needs no Google call at request time.
+CREATE TABLE IF NOT EXISTS retailer_access (
+  email         TEXT NOT NULL,
+  retailer_name TEXT NOT NULL,
+  retailer_id   TEXT NOT NULL,
+  synced_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (email, retailer_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_access_email ON retailer_access (email);
